@@ -172,6 +172,86 @@ pub struct ControlReading {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PresetEntry {
+    pub monitor: MonitorId,
+    pub control: ControlKey,
+    pub value: ControlValue,
+}
+
+impl PresetEntry {
+    /// Numeric controls need a 0-100 normalized value; others need an enum value.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        match (self.control.is_numeric(), self.value) {
+            (true, ControlValue::Normalized(value)) if value <= 100 => Ok(()),
+            (true, ControlValue::Normalized(value)) => {
+                Err(DomainError::NormalizedValueOutOfRange(value))
+            }
+            (false, ControlValue::Enum(_)) => Ok(()),
+            _ => Err(DomainError::InvalidNumericCapability(self.control)),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Preset {
+    pub name: String,
+    pub entries: Vec<PresetEntry>,
+}
+
+/// MCCS colour preset values 0x0B-0x0D are the user profiles; the others
+/// (sRGB, native, colour temperatures) are fixed modes with their own gains.
+pub fn is_user_color_preset(value: u32) -> bool {
+    (0x0B..=0x0D).contains(&value)
+}
+
+impl Preset {
+    /// RGB gains only belong to a user colour profile, and writing one makes the
+    /// monitor switch to that profile. A gain entry is therefore inert when the
+    /// preset selects a fixed colour preset for the same monitor.
+    pub fn is_entry_inert(&self, entry: &PresetEntry) -> bool {
+        matches!(
+            entry.control,
+            ControlKey::GainRed | ControlKey::GainGreen | ControlKey::GainBlue
+        ) && self.entries.iter().any(|other| {
+            other.monitor == entry.monitor
+                && other.control == ControlKey::ColorPreset
+                && matches!(other.value, ControlValue::Enum(value) if !is_user_color_preset(value))
+        })
+    }
+}
+
+pub const PRESET_NAME_MAX_CHARS: usize = 40;
+
+/// Returns the trimmed name if it satisfies SPEC-PRE-1 (1-40 characters).
+pub fn validate_preset_name(name: &str) -> Result<String, DomainError> {
+    let name = name.trim();
+    let length = name.chars().count();
+    if length == 0 || length > PRESET_NAME_MAX_CHARS {
+        return Err(DomainError::InvalidPresetName);
+    }
+    Ok(name.to_owned())
+}
+
+pub fn preset_names_equal(left: &str, right: &str) -> bool {
+    left.to_lowercase() == right.to_lowercase()
+}
+
+impl ControlKey {
+    /// Fixed apply order from SPEC-PRE-4.
+    pub fn preset_apply_rank(self) -> u8 {
+        match self {
+            Self::Power => 0,
+            Self::Input => 1,
+            Self::ColorPreset => 2,
+            Self::GainRed | Self::GainGreen | Self::GainBlue => 3,
+            Self::Brightness => 4,
+            Self::Contrast => 5,
+            Self::Volume => 6,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppSettings {
     pub debounce_ms: u32,
     pub confirm_input_change: bool,
@@ -199,6 +279,7 @@ pub enum DomainError {
     InvalidNumericCapability(ControlKey),
     InvalidEnumCapability(ControlKey),
     EnumValueUnavailable { control: ControlKey, value: u32 },
+    InvalidPresetName,
 }
 
 impl fmt::Display for DomainError {
@@ -220,6 +301,9 @@ impl fmt::Display for DomainError {
             }
             Self::EnumValueUnavailable { control, value } => {
                 write!(f, "enum value {value} is not available for {control}")
+            }
+            Self::InvalidPresetName => {
+                f.write_str("preset name must be between 1 and 40 characters")
             }
         }
     }
@@ -261,5 +345,57 @@ mod tests {
         };
         assert!(capability.validate_enum(0x31).is_ok());
         assert!(capability.validate_enum(0x99).is_err());
+    }
+
+    #[test]
+    fn preset_names_are_trimmed_and_length_checked() {
+        assert_eq!(validate_preset_name("  Day  ").unwrap(), "Day");
+        assert!(validate_preset_name("   ").is_err());
+        assert!(validate_preset_name(&"x".repeat(41)).is_err());
+        assert!(validate_preset_name(&"x".repeat(40)).is_ok());
+        assert!(preset_names_equal("Day", "dAY"));
+    }
+
+    #[test]
+    fn gains_are_inert_only_under_a_fixed_colour_preset() {
+        let monitor = MonitorId::new("m").unwrap();
+        let entry = |control, value| PresetEntry {
+            monitor: monitor.clone(),
+            control,
+            value,
+        };
+        let gain = entry(ControlKey::GainRed, ControlValue::Normalized(40));
+        let mut preset = Preset {
+            name: "p".into(),
+            entries: vec![
+                entry(ControlKey::ColorPreset, ControlValue::Enum(0x06)),
+                gain.clone(),
+            ],
+        };
+        assert!(preset.is_entry_inert(&gain));
+        assert!(!preset.is_entry_inert(&preset.entries[0].clone()));
+        preset.entries[0].value = ControlValue::Enum(0x0B);
+        assert!(!preset.is_entry_inert(&gain));
+        preset.entries.remove(0);
+        assert!(!preset.is_entry_inert(&gain));
+    }
+
+    #[test]
+    fn preset_apply_order_follows_the_spec() {
+        let mut keys = [
+            ControlKey::Volume,
+            ControlKey::Contrast,
+            ControlKey::Brightness,
+            ControlKey::GainRed,
+            ControlKey::ColorPreset,
+            ControlKey::Input,
+            ControlKey::Power,
+        ];
+        keys.sort_by_key(|key| key.preset_apply_rank());
+        assert_eq!(keys[0], ControlKey::Power);
+        assert_eq!(keys[1], ControlKey::Input);
+        assert_eq!(keys[2], ControlKey::ColorPreset);
+        assert_eq!(keys[3], ControlKey::GainRed);
+        assert_eq!(keys[6], ControlKey::Volume);
     }
 }

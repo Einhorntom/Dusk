@@ -30,7 +30,7 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-CTL-4: Enum values have stable canonical keys where the standard defines them (e.g. `hdmi1`, `hdmi2`, `dp1`, `dp2`, `usbc`, `vga`) and fall back to `raw-<code>` for values the app does not recognize. Users can give any value a friendly alias in settings.
 - SPEC-CTL-5: Setting an unsupported control, an unavailable enum value or an out-of-range value MUST fail with a clear error and change nothing. Hotkey steps clamp to the range limits.
 - SPEC-CTL-6: `power=standby` turns the display off. Waking is attempted through the monitor's control interface; if the monitor does not support it, the UI and CLI say so rather than failing silently.
-- SPEC-CTL-7: A preset stores normalized values and canonical enum keys, so it stays valid if the monitor's native ranges differ; entries that the target monitor doesn't support are skipped and reported (SPEC-PRE-3).
+- SPEC-CTL-7: A preset stores normalized values and native enum values (as stored in the config file), so it stays valid if the monitor's native ranges differ; entries that the target monitor doesn't support are skipped and reported (SPEC-PRE-3).
 
 ### 2.1 Quirk profiles (optional)
 - SPEC-QRK-1: Some monitors report wrong or incomplete capabilities. The app MAY load an optional per-model quirk profile (matched by manufacturer and model from the monitor's identification data) that overrides or supplements discovered capabilities, timing, or retry behavior.
@@ -68,8 +68,11 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-PRE-1: A preset has a unique name (case-insensitive, 1-40 characters), an ordering position, and a list of entries: `{monitor, control, value}`.
 - SPEC-PRE-2: "Capture" reads current values of all supported controls on the selected monitors and stores them; the user may deselect controls before saving.
 - SPEC-PRE-3: Apply commits each entry whose target differs from the monitor's current value (SPEC-WR-4, SPEC-WR-7). Entries for absent monitors are skipped; the result reports which were applied, skipped or failed.
-- SPEC-PRE-4: Apply order is fixed: `power`, `input`, `color-preset`, gains, `brightness`, `contrast`, `volume`. A failure in one entry does not stop the others.
+- SPEC-PRE-4: Apply order is fixed: `power`, `input`, `color-preset`, gains, `brightness`, `contrast`, `volume`. A failure in one entry does not stop the others. DDC/CI has no multi-value write, so each entry is a separate command; to minimise the visible transition, all entries are read first and the differing values are then written back to back without reads in between. After a colour-preset change the monitor loads that mode's stored values, so the remaining entries for that monitor are written even if they matched before the switch, after a short settle delay.
+- SPEC-PRE-4a: RGB gains belong to the monitor's user colour profiles (MCCS colour preset `0x0B`-`0x0D`), and writing a gain switches the monitor to one. When a preset selects any other colour preset for a monitor, its gain entries for that monitor are not captured, applied or compared (SPEC-PRE-7), and the editor marks them as not applied.
 - SPEC-PRE-5: Presets can be renamed, edited, deleted and reordered. Deleting a preset used by a schedule rule or hotkey requires confirmation and removes or flags those references.
+- SPEC-PRE-5a: The stored values of a preset can be viewed and individually changed or removed (Settings "Edit" page; CLI `preset set|unset`).
+- SPEC-PRE-5b: Presets are stored in the app's config file (`%APPDATA%\dispcontrol\config.toml`; CLI `preset path`). They can be exported to and imported from a commented, human-editable TOML document (CLI `preset export [file]`, `preset import <file> [--replace]`; Settings exports/imports `dispcontrol-presets.toml` next to the config file). Import merges by name unless `--replace` is given, and rejects an invalid document without changing the stored presets.
 - SPEC-PRE-6: "Cycle presets" applies the next preset in order, wrapping around; the starting point is the last applied preset or the first if none.
 - SPEC-PRE-7: The panel marks the preset whose values match the current monitor state, if any.
 
@@ -101,7 +104,7 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-UI-5: The panel follows the system light/dark theme and has a native Windows 11 appearance.
 - SPEC-UI-6: Settings include: hotkeys, step sizes, schedule rules, write delay, live preview, input confirmation and revert timer, on-screen indicator, start with Windows, audit log, monitor aliases.
 - SPEC-UI-7: The panel is fully keyboard-operable and exposes names/values to screen readers.
-- SPEC-UI-10 (v0 Settings): The default Settings window follows the visual design and interaction structure of `mockups/settings.html`, including a Windows 11-style navigation/sidebar, grouped content cards, monitor selection and controls, and safety/write settings. It shows only implemented features: discovered monitor selection and controls, quiet-period write setting, input-change confirmation, and input-revert timer. Presets, Hotkeys, and Schedule pages are omitted until those features are implemented; unsupported controls are not displayed as available.
+- SPEC-UI-10 (v0 Settings): The default Settings window follows the visual design and interaction structure of `mockups/settings.html`, including a Windows 11-style navigation/sidebar, grouped content cards, monitor selection and controls, and safety/write settings. It shows only implemented features: discovered monitor selection and controls, quiet-period write setting, input-change confirmation, and input-revert timer. A Presets page (list with apply/rename/reorder/delete, save current with optional input source, current-match marker) is included from v1; Hotkeys and Schedule pages are omitted until implemented; unsupported controls are not displayed as available.
 - SPEC-UI-11 (Windows presentation fallback): `dispcontrold --native-ui` opens the original compact Win32 layout instead of the default grouped Settings layout. Both presentations use the same application API and behavior.
 
 ## 10. Command line
@@ -113,7 +116,10 @@ Executable: `dispcontrol`. Global flags: `--json`, `--monitor <id|alias|index>`,
 | `get <control>` | Print the current value (reads the monitor). |
 | `set <control> <value>` | Commit value (SPEC-WR-7). Accepts `+N`/`-N` for relative numeric changes and `N` absolute. |
 | `preset list` | List presets. |
-| `preset apply <name>` | Apply preset, print per-entry result. |
+| `preset apply <name>` | Apply preset, print per-entry result. Exit 5 if some entries failed. |
+| `preset next` / `preset prev` | Cycle presets. |
+| `preset save <name> [monitor] [--include-input]` | Capture current values (upsert). Power is never captured. |
+| `preset delete <name>` / `rename <name> <new>` / `move <name> <offset>` | Manage presets. |
 | `preset save <name>` | Capture current state as preset. |
 | `schedule pause` / `resume` / `status` | Control the schedule. |
 | `audit` | Print commit counts (SPEC-WR-10). |

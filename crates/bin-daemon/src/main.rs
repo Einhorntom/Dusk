@@ -3,7 +3,9 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dispcontrol_app::{Clock, InputChangePrompter, MonitorService, SettingsRepository};
+use dispcontrol_app::{
+    Clock, InputChangePrompter, MonitorService, PresetRepository, SettingsRepository,
+};
 use dispcontrol_ddc_windows::WindowsDdcBackend;
 use dispcontrol_domain::Monitor;
 use dispcontrol_ipc::dispatch;
@@ -146,11 +148,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let path = FileSettingsRepository::default_path()?;
     let backend = Arc::new(WindowsDdcBackend::new());
-    let settings: Arc<dyn SettingsRepository> = Arc::new(FileSettingsRepository::new(path));
+    let store = Arc::new(FileSettingsRepository::new(path));
+    let settings: Arc<dyn SettingsRepository> = store.clone();
+    let presets: Arc<dyn PresetRepository> = store;
     let prompter = Arc::new(DesktopInputPrompter);
     let service = Arc::new(MonitorService::new(
         backend,
         settings,
+        presets,
         prompter,
         Arc::new(DesktopClock),
     ));

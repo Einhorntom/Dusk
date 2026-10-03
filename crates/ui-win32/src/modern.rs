@@ -44,6 +44,25 @@ const VALUE_BASE_ID: u16 = 1100;
 const COMBO_BASE_ID: u16 = 1200;
 const REVERT_SLIDER_ID: u16 = 1501;
 const CONFIRM_TOGGLE_ID: u16 = 2000;
+const PRESET_NAME_ID: u16 = 2050;
+const PRESET_SAVE_ID: u16 = 2051;
+const PRESET_SAVE_INPUT_ID: u16 = 2052;
+const PRESET_APPLY_BASE_ID: u16 = 2100;
+const PRESET_RENAME_BASE_ID: u16 = 2200;
+const PRESET_UP_BASE_ID: u16 = 2300;
+const PRESET_DOWN_BASE_ID: u16 = 2400;
+const PRESET_DELETE_BASE_ID: u16 = 2500;
+const PRESET_ENTRY_VALUE_BASE_ID: u16 = 2600;
+const PRESET_ENTRY_SET_BASE_ID: u16 = 2700;
+const PRESET_ENTRY_REMOVE_BASE_ID: u16 = 2800;
+const PRESET_EDIT_BASE_ID: u16 = 2900;
+const PRESET_BACK_ID: u16 = 3001;
+const PRESET_EXPORT_ID: u16 = 3002;
+const PRESET_IMPORT_ID: u16 = 3003;
+const PRESET_FOLDER_ID: u16 = 3004;
+const PRESET_EXCHANGE_FILE: &str = "dispcontrol-presets.toml";
+const PRESET_MAX: usize = 99;
+const EM_SETLIMITTEXT: u32 = 0x00C5;
 const SS_NOTIFY: u32 = 0x100;
 const EDIT_ID: u16 = 1900;
 const WM_CTLCOLOREDIT: u32 = 0x0133;
@@ -72,12 +91,14 @@ const WM_SIZE: u32 = 0x0005;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Page {
     Monitors,
+    Presets,
     Safety,
     General,
 }
 
-const PAGES: [(Page, &str, &str); 3] = [
+const PAGES: [(Page, &str, &str); 4] = [
     (Page::Monitors, "\u{E7F4}", "Monitors"),
+    (Page::Presets, "\u{E8FD}", "Presets"),
     (Page::Safety, "\u{EA18}", "Safety & writes"),
     (Page::General, "\u{E713}", "General"),
 ];
@@ -208,6 +229,8 @@ pub(crate) struct State {
     delay_value: HWND,
     revert_value: HWND,
     pending_settings: Option<AppSettings>,
+    preset_name: String,
+    editing_preset: Option<String>,
     scroll_y: i32,
     total_height: i32,
 }
@@ -233,6 +256,8 @@ impl State {
             delay_value: HWND::default(),
             revert_value: HWND::default(),
             pending_settings: None,
+            preset_name: String::new(),
+            editing_preset: None,
             scroll_y: 0,
             total_height: 0,
         }
@@ -542,6 +567,7 @@ fn selected_page_index(state: &State) -> usize {
 pub(crate) fn refresh(context: &mut WindowContext) {
     match context.model.refresh() {
         Ok(()) => {
+            let _ = context.model.refresh_presets();
             context.modern.pending_settings = None;
             set_status(
                 context,
@@ -954,6 +980,9 @@ fn client_height(window: HWND) -> i32 {
 }
 
 fn build_page(context: &mut WindowContext, client_w: i32) {
+    if let Some(name) = read_preset_name(context) {
+        context.modern.preset_name = name;
+    }
     for child in context.modern.children.drain(..) {
         unsafe {
             let _ = DestroyWindow(child);
@@ -982,6 +1011,7 @@ fn build_page(context: &mut WindowContext, client_w: i32) {
     };
     match page {
         Page::Monitors => build_monitors(&mut builder),
+        Page::Presets => build_presets(&mut builder),
         Page::Safety => build_safety(&mut builder),
         Page::General => build_general(&mut builder),
     }
@@ -1163,6 +1193,203 @@ fn add_control_row(builder: &mut Builder<'_>, index: usize, reading: &ControlRea
             });
         }
     }
+}
+
+fn build_presets(builder: &mut Builder<'_>) {
+    use windows::Win32::UI::WindowsAndMessaging::{ES_AUTOHSCROLL, WS_BORDER};
+    builder.heading("Presets");
+    let presets: Vec<_> = builder.context.model.presets().to_vec();
+    let matching = builder.context.model.matching_preset().map(str::to_owned);
+    if let Some(name) = builder.context.modern.editing_preset.clone() {
+        if let Some(preset) = presets
+            .iter()
+            .find(|preset| dispcontrol_domain::preset_names_equal(&preset.name, &name))
+        {
+            build_preset_detail(builder, preset);
+            return;
+        }
+        builder.context.modern.editing_preset = None;
+    }
+
+    builder.section("Saved presets");
+    builder.card_begin();
+    if presets.is_empty() {
+        builder.row(
+            "No presets yet",
+            Some("Set the monitor the way you like it, then save it below."),
+            0,
+        );
+    }
+    let widths = [60, 52, 68, 32, 32, 60];
+    let gap = builder.px(6);
+    let total: i32 = widths.iter().map(|w| builder.px(*w)).sum::<i32>() + gap * 5;
+    for (index, preset) in presets.iter().enumerate().take(PRESET_MAX) {
+        let current = matching
+            .as_deref()
+            .is_some_and(|name| dispcontrol_domain::preset_names_equal(name, &preset.name));
+        let title = if current {
+            format!("{}  (current)", preset.name)
+        } else {
+            preset.name.clone()
+        };
+        let description = format!("{} saved settings", preset.entries.len());
+        let (top, height) = builder.row(&title, Some(&description), total);
+        let mut x = builder.control_x(total);
+        let y = top + (height - builder.px(32)) / 2;
+        let buttons = [
+            (PRESET_APPLY_BASE_ID, "Apply"),
+            (PRESET_EDIT_BASE_ID, "Edit"),
+            (PRESET_RENAME_BASE_ID, "Rename"),
+            (PRESET_UP_BASE_ID, "\u{25B2}"),
+            (PRESET_DOWN_BASE_ID, "\u{25BC}"),
+            (PRESET_DELETE_BASE_ID, "Delete"),
+        ];
+        for ((id, text), width) in buttons.iter().zip(widths) {
+            let width = builder.px(width);
+            builder.button(*id + index as u16, text, x, y, width);
+            x += width + gap;
+        }
+    }
+    builder.card_end();
+
+    builder.section("Save current settings as a preset");
+    builder.card_begin();
+    let name_width = builder.px(280);
+    let (top, height) = builder.row(
+        "Preset name",
+        Some("To rename a preset, type the new name here and press Rename on it."),
+        name_width,
+    );
+    let draft = builder.context.modern.preset_name.clone();
+    let edit = builder.create(
+        w!("EDIT"),
+        &draft,
+        PRESET_NAME_ID,
+        WS_TABSTOP.0 | WS_BORDER.0 | ES_AUTOHSCROLL as u32,
+        (
+            builder.control_x(name_width),
+            top + (height - builder.px(30)) / 2,
+            name_width,
+            builder.px(30),
+        ),
+        FontKind::Body,
+    );
+    send(edit, EM_SETLIMITTEXT, WPARAM(40), LPARAM(0));
+    let button_width = builder.px(170);
+    let (top, height) = builder.row(
+        "Save",
+        Some("Stores brightness, contrast, colour and volume. Input source is stored only if you choose to."),
+        button_width * 2 + gap,
+    );
+    let y = top + (height - builder.px(32)) / 2;
+    let x = builder.control_x(button_width * 2 + gap);
+    builder.button(PRESET_SAVE_ID, "Save current", x, y, button_width);
+    builder.button(
+        PRESET_SAVE_INPUT_ID,
+        "Save incl. input source",
+        x + button_width + gap,
+        y,
+        button_width,
+    );
+    builder.card_end();
+
+    builder.section("Export, import and file location");
+    builder.card_begin();
+    let location = builder.context.model.presets_location();
+    let folder = exchange_path(&location);
+    let width = builder.px(110);
+    let total = width * 3 + gap * 2;
+    let (top, height) = builder.row(
+        "Text file",
+        Some(&format!(
+            "Presets live in {location}. Export and import use {}.",
+            folder.display()
+        )),
+        total,
+    );
+    let y = top + (height - builder.px(32)) / 2;
+    let mut x = builder.control_x(total);
+    for (id, text) in [
+        (PRESET_EXPORT_ID, "Export"),
+        (PRESET_IMPORT_ID, "Import"),
+        (PRESET_FOLDER_ID, "Open folder"),
+    ] {
+        builder.button(id, text, x, y, width);
+        x += width + gap;
+    }
+    builder.card_end();
+}
+
+fn exchange_path(location: &str) -> std::path::PathBuf {
+    std::path::Path::new(location)
+        .parent()
+        .map(|dir| dir.join(PRESET_EXCHANGE_FILE))
+        .unwrap_or_else(|| std::path::PathBuf::from(PRESET_EXCHANGE_FILE))
+}
+
+fn build_preset_detail(builder: &mut Builder<'_>, preset: &dispcontrol_domain::Preset) {
+    use windows::Win32::UI::WindowsAndMessaging::{ES_AUTOHSCROLL, ES_NUMBER, ES_RIGHT, WS_BORDER};
+    let gap = builder.px(6);
+    builder.section(&format!("Settings stored in '{}'", preset.name));
+    builder.card_begin();
+    let back_width = builder.px(100);
+    let (top, height) = builder.row(
+        "Back to presets",
+        Some("Change a value, then press Set. Applying the preset writes only values that differ."),
+        back_width,
+    );
+    let x = builder.control_x(back_width);
+    builder.button(
+        PRESET_BACK_ID,
+        "Back",
+        x,
+        top + (height - builder.px(32)) / 2,
+        back_width,
+    );
+    if preset.entries.is_empty() {
+        builder.row("This preset has no settings", None, 0);
+    }
+    let edit_width = builder.px(70);
+    let button_width = builder.px(72);
+    let total = edit_width + button_width * 2 + gap * 2;
+    for (index, entry) in preset.entries.iter().enumerate().take(PRESET_MAX) {
+        let (text, current) = match entry.value {
+            ControlValue::Normalized(value) => (value.to_string(), format!("{value}%")),
+            ControlValue::Enum(value) => (value.to_string(), enum_label(entry.control, value)),
+        };
+        let mut description = format!("{} \u{2014} currently {current}", entry.monitor.as_str());
+        if preset.is_entry_inert(entry) {
+            description.push_str(" (not applied: the colour preset has its own gains)");
+        }
+        let (top, height) = builder.row(control_title(entry.control), Some(&description), total);
+        let x = builder.control_x(total);
+        let edit_height = builder.px(30);
+        let y = top + (height - edit_height) / 2;
+        builder.create(
+            w!("EDIT"),
+            &text,
+            PRESET_ENTRY_VALUE_BASE_ID + index as u16,
+            WS_TABSTOP.0 | WS_BORDER.0 | ES_NUMBER as u32 | ES_RIGHT as u32 | ES_AUTOHSCROLL as u32,
+            (x, y, edit_width, edit_height),
+            FontKind::Body,
+        );
+        let y = top + (height - builder.px(32)) / 2;
+        builder.button(
+            PRESET_ENTRY_SET_BASE_ID + index as u16,
+            "Set",
+            x + edit_width + gap,
+            y,
+            button_width,
+        );
+        builder.button(
+            PRESET_ENTRY_REMOVE_BASE_ID + index as u16,
+            "Remove",
+            x + edit_width + button_width + gap * 2,
+            y,
+            button_width,
+        );
+    }
+    builder.card_end();
 }
 
 fn build_safety(builder: &mut Builder<'_>) {
@@ -1655,8 +1882,26 @@ pub(crate) fn handle_command(context: &mut WindowContext, wparam: WPARAM) {
         if page != context.modern.page {
             context.modern.page = page;
             context.modern.scroll_y = 0;
+            if page == Page::Presets {
+                let _ = context.model.refresh_presets();
+            }
             rebuild(context);
         }
+    } else if notification == 0 && id == PRESET_SAVE_ID {
+        save_preset(context, false);
+    } else if notification == 0 && id == PRESET_SAVE_INPUT_ID {
+        save_preset(context, true);
+    } else if notification == 0 && (PRESET_BACK_ID..=PRESET_FOLDER_ID).contains(&id) {
+        preset_file_action(context, id);
+    } else if notification == 0
+        && (PRESET_ENTRY_SET_BASE_ID..PRESET_ENTRY_REMOVE_BASE_ID + 100).contains(&id)
+    {
+        preset_entry_action(context, id);
+    } else if notification == 0
+        && ((PRESET_APPLY_BASE_ID..PRESET_DELETE_BASE_ID + 100).contains(&id)
+            || (PRESET_EDIT_BASE_ID..PRESET_EDIT_BASE_ID + 100).contains(&id))
+    {
+        preset_row_action(context, id);
     } else if (VALUE_BASE_ID..VALUE_BASE_ID + 100).contains(&id) && notification == 0 {
         begin_value_edit(context, id);
     } else if id == EDIT_ID && notification == EN_KILLFOCUS {
@@ -1679,6 +1924,229 @@ pub(crate) fn handle_command(context: &mut WindowContext, wparam: WPARAM) {
                 let _ = InvalidateRect(Some(*window), None, true);
             }
         }
+    }
+}
+
+fn read_preset_name(context: &WindowContext) -> Option<String> {
+    let edit = context
+        .modern
+        .children
+        .iter()
+        .copied()
+        .find(|window| unsafe { GetDlgCtrlID(*window) } == i32::from(PRESET_NAME_ID))?;
+    let mut buffer = [0u16; 64];
+    let length = unsafe { GetWindowTextW(edit, &mut buffer) }.max(0) as usize;
+    Some(String::from_utf16_lossy(&buffer[..length]))
+}
+
+fn save_preset(context: &mut WindowContext, include_input: bool) {
+    let name = read_preset_name(context).unwrap_or_default();
+    match context.model.save_current_as_preset(&name, include_input) {
+        Ok(preset) => {
+            context.modern.preset_name.clear();
+            let _ = context.model.refresh_presets();
+            set_status(
+                context,
+                &format!(
+                    "Saved preset '{}' with {} settings.",
+                    preset.name,
+                    preset.entries.len()
+                ),
+            );
+            rebuild(context);
+        }
+        Err(error) => set_status(context, &error.to_string()),
+    }
+}
+
+fn read_dialog_text(context: &WindowContext, id: u16) -> Option<String> {
+    let edit = context
+        .modern
+        .children
+        .iter()
+        .copied()
+        .find(|window| unsafe { GetDlgCtrlID(*window) } == i32::from(id))?;
+    let mut buffer = [0u16; 16];
+    let length = unsafe { GetWindowTextW(edit, &mut buffer) }.max(0) as usize;
+    Some(String::from_utf16_lossy(&buffer[..length]))
+}
+
+fn preset_entry_action(context: &mut WindowContext, id: u16) {
+    let kind = id / 100 * 100;
+    let index = (id % 100) as usize;
+    let Some(name) = context.modern.editing_preset.clone() else {
+        return;
+    };
+    let Some(entry) = context
+        .model
+        .presets()
+        .iter()
+        .find(|preset| dispcontrol_domain::preset_names_equal(&preset.name, &name))
+        .and_then(|preset| preset.entries.get(index).cloned())
+    else {
+        return;
+    };
+    let result = match kind {
+        PRESET_ENTRY_SET_BASE_ID => {
+            let text = read_dialog_text(context, PRESET_ENTRY_VALUE_BASE_ID + index as u16)
+                .unwrap_or_default();
+            let Ok(number) = text.trim().parse::<u32>() else {
+                set_status(context, "Enter a whole number.");
+                return;
+            };
+            let value = match entry.value {
+                ControlValue::Normalized(_) => ControlValue::Normalized(number),
+                ControlValue::Enum(_) => ControlValue::Enum(number),
+            };
+            let result = context
+                .model
+                .set_preset_entry(&name, dispcontrol_domain::PresetEntry { value, ..entry });
+            if result.is_ok() {
+                set_status(context, &format!("Updated '{name}'."));
+            }
+            result
+        }
+        PRESET_ENTRY_REMOVE_BASE_ID => {
+            let result = context
+                .model
+                .remove_preset_entry(&name, &entry.monitor, entry.control);
+            if result.is_ok() {
+                set_status(context, &format!("Removed a setting from '{name}'."));
+            }
+            result
+        }
+        _ => return,
+    };
+    match result {
+        Ok(()) => rebuild(context),
+        Err(error) => set_status(context, &error.to_string()),
+    }
+}
+
+fn preset_file_action(context: &mut WindowContext, id: u16) {
+    let path = exchange_path(&context.model.presets_location());
+    match id {
+        PRESET_BACK_ID => {
+            context.modern.editing_preset = None;
+            context.modern.scroll_y = 0;
+            rebuild(context);
+        }
+        PRESET_EXPORT_ID => {
+            let message = match context.model.export_presets() {
+                Ok(text) => match std::fs::write(&path, text) {
+                    Ok(()) => format!("Exported presets to {}.", path.display()),
+                    Err(error) => format!("Could not write {}: {error}", path.display()),
+                },
+                Err(error) => error.to_string(),
+            };
+            set_status(context, &message);
+        }
+        PRESET_IMPORT_ID => {
+            let message = match std::fs::read_to_string(&path) {
+                Ok(text) => match context.model.import_presets(&text, false) {
+                    Ok(summary) => {
+                        rebuild(context);
+                        format!(
+                            "Imported {}: {} added, {} updated.",
+                            path.display(),
+                            summary.added,
+                            summary.updated
+                        )
+                    }
+                    Err(error) => error.to_string(),
+                },
+                Err(error) => format!("Could not read {}: {error}", path.display()),
+            };
+            set_status(context, &message);
+        }
+        PRESET_FOLDER_ID => {
+            use windows::Win32::UI::Shell::ShellExecuteW;
+            use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+            if let Some(dir) = path.parent() {
+                let dir = wide_null(&dir.to_string_lossy());
+                unsafe {
+                    ShellExecuteW(
+                        None,
+                        w!("open"),
+                        PCWSTR(dir.as_ptr()),
+                        PCWSTR::null(),
+                        PCWSTR::null(),
+                        SW_SHOWNORMAL,
+                    );
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn preset_row_action(context: &mut WindowContext, id: u16) {
+    let kind = id / 100 * 100;
+    let index = (id % 100) as usize;
+    let Some(name) = context
+        .model
+        .presets()
+        .get(index)
+        .map(|preset| preset.name.clone())
+    else {
+        return;
+    };
+    let result = match kind {
+        PRESET_APPLY_BASE_ID => match context.model.apply_preset(&name) {
+            Ok(report) => {
+                let mut message = format!(
+                    "Applied '{}': {} changed, {} already set, {} skipped, {} failed.",
+                    report.preset,
+                    report.applied(),
+                    report.unchanged(),
+                    report.skipped(),
+                    report.failed()
+                );
+                if let Some(dispcontrol_app::EntryStatus::Failed(reason)) = report
+                    .outcomes
+                    .iter()
+                    .map(|outcome| &outcome.status)
+                    .find(|status| matches!(status, dispcontrol_app::EntryStatus::Failed(_)))
+                {
+                    message.push_str(&format!(" First failure: {reason}"));
+                }
+                set_status(context, &message);
+                rebuild(context);
+                return;
+            }
+            Err(error) => Err(error),
+        },
+        PRESET_RENAME_BASE_ID => {
+            let new_name = read_preset_name(context).unwrap_or_default();
+            let result = context.model.rename_preset(&name, &new_name);
+            if result.is_ok() {
+                context.modern.preset_name.clear();
+                set_status(
+                    context,
+                    &format!("Renamed '{name}' to '{}'.", new_name.trim()),
+                );
+            }
+            result
+        }
+        PRESET_EDIT_BASE_ID => {
+            context.modern.editing_preset = Some(name);
+            context.modern.scroll_y = 0;
+            Ok(())
+        }
+        PRESET_UP_BASE_ID => context.model.move_preset(&name, -1),
+        PRESET_DOWN_BASE_ID => context.model.move_preset(&name, 1),
+        PRESET_DELETE_BASE_ID => {
+            let result = context.model.delete_preset(&name);
+            if result.is_ok() {
+                set_status(context, &format!("Deleted preset '{name}'."));
+            }
+            result
+        }
+        _ => return,
+    };
+    match result {
+        Ok(()) => rebuild(context),
+        Err(error) => set_status(context, &error.to_string()),
     }
 }
 

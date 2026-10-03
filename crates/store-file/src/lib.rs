@@ -4,18 +4,25 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use dispcontrol_app::{BackendError, SettingsRepository};
-use dispcontrol_domain::AppSettings;
+use dispcontrol_app::{BackendError, PresetRepository, SettingsRepository};
+use dispcontrol_domain::{
+    AppSettings, ControlKey, ControlValue, MonitorId, Preset, PresetEntry, validate_preset_name,
+};
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct FileSettingsRepository {
     path: PathBuf,
+    write_lock: Mutex<()>,
 }
 
 impl FileSettingsRepository {
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            write_lock: Mutex::new(()),
+        }
     }
 
     pub fn default_path() -> Result<PathBuf, BackendError> {
@@ -68,30 +75,207 @@ impl TryFrom<SettingsFile> for AppSettings {
     }
 }
 
-impl SettingsRepository for FileSettingsRepository {
-    fn load(&self) -> Result<AppSettings, BackendError> {
+#[derive(Serialize, Deserialize)]
+struct PresetFile {
+    name: String,
+    #[serde(default)]
+    entries: Vec<PresetEntryFile>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PresetEntryFile {
+    monitor: String,
+    control: String,
+    kind: String,
+    value: u32,
+}
+
+impl From<&Preset> for PresetFile {
+    fn from(preset: &Preset) -> Self {
+        Self {
+            name: preset.name.clone(),
+            entries: preset
+                .entries
+                .iter()
+                .map(|entry| {
+                    let (kind, value) = match entry.value {
+                        ControlValue::Normalized(value) => ("normalized", value),
+                        ControlValue::Enum(value) => ("enum", value),
+                    };
+                    PresetEntryFile {
+                        monitor: entry.monitor.as_str().to_owned(),
+                        control: entry.control.as_str().to_owned(),
+                        kind: kind.to_owned(),
+                        value,
+                    }
+                })
+                .collect(),
+        }
+    }
+}
+
+impl TryFrom<PresetFile> for Preset {
+    type Error = BackendError;
+
+    fn try_from(file: PresetFile) -> Result<Self, Self::Error> {
+        let fail = |message: String| BackendError::Failed(format!("preset: {message}"));
+        let name = validate_preset_name(&file.name).map_err(|error| fail(error.to_string()))?;
+        let mut entries = Vec::with_capacity(file.entries.len());
+        for entry in file.entries {
+            let control: ControlKey = entry
+                .control
+                .parse()
+                .map_err(|_| fail(format!("unknown control '{}'", entry.control)))?;
+            let value = match (entry.kind.as_str(), control.is_numeric()) {
+                ("normalized", true) if entry.value <= 100 => ControlValue::Normalized(entry.value),
+                ("enum", false) => ControlValue::Enum(entry.value),
+                _ => {
+                    return Err(fail(format!(
+                        "invalid {} value for '{}' in '{name}'",
+                        entry.kind, entry.control
+                    )));
+                }
+            };
+            entries.push(PresetEntry {
+                monitor: MonitorId::new(entry.monitor).map_err(|error| fail(error.to_string()))?,
+                control,
+                value,
+            });
+        }
+        Ok(Preset { name, entries })
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct ConfigFile {
+    #[serde(flatten)]
+    settings: SettingsFile,
+    #[serde(default)]
+    presets: Vec<PresetFile>,
+}
+
+impl FileSettingsRepository {
+    fn read_file(&self) -> Result<Option<ConfigFile>, BackendError> {
         if !self.path.exists() {
-            return Ok(AppSettings::default());
+            return Ok(None);
         }
         let content = fs::read_to_string(&self.path).map_err(io_error)?;
-        let file: SettingsFile = toml::from_str(&content).map_err(|error| {
+        toml::from_str(&content).map(Some).map_err(|error| {
             BackendError::Failed(format!("cannot parse {}: {error}", self.path.display()))
-        })?;
-        AppSettings::try_from(file)
+        })
     }
 
-    fn save(&self, settings: &AppSettings) -> Result<(), BackendError> {
-        validate(settings)?;
+    fn write_file(&self, file: &ConfigFile) -> Result<(), BackendError> {
         let parent = self
             .path
             .parent()
             .ok_or_else(|| BackendError::Failed("settings path has no parent".into()))?;
         fs::create_dir_all(parent).map_err(io_error)?;
-        let content = toml::to_string_pretty(&SettingsFile::from(settings.clone()))
+        let content = toml::to_string_pretty(file)
             .map_err(|error| BackendError::Failed(format!("cannot encode settings: {error}")))?;
         atomic_write(&self.path, content.as_bytes()).map_err(io_error)
     }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.write_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 }
+
+impl SettingsRepository for FileSettingsRepository {
+    fn load(&self) -> Result<AppSettings, BackendError> {
+        let _guard = self.lock();
+        match self.read_file()? {
+            Some(file) => AppSettings::try_from(file.settings),
+            None => Ok(AppSettings::default()),
+        }
+    }
+
+    fn save(&self, settings: &AppSettings) -> Result<(), BackendError> {
+        validate(settings)?;
+        let _guard = self.lock();
+        let presets = self
+            .read_file()
+            .ok()
+            .flatten()
+            .map(|file| file.presets)
+            .unwrap_or_default();
+        self.write_file(&ConfigFile {
+            settings: SettingsFile::from(settings.clone()),
+            presets,
+        })
+    }
+}
+
+impl PresetRepository for FileSettingsRepository {
+    fn load_presets(&self) -> Result<Vec<Preset>, BackendError> {
+        let _guard = self.lock();
+        match self.read_file()? {
+            Some(file) => file.presets.into_iter().map(Preset::try_from).collect(),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn save_presets(&self, presets: &[Preset]) -> Result<(), BackendError> {
+        let _guard = self.lock();
+        let settings = match self.read_file()? {
+            Some(file) => file.settings,
+            None => SettingsFile::from(AppSettings::default()),
+        };
+        self.write_file(&ConfigFile {
+            settings,
+            presets: presets.iter().map(PresetFile::from).collect(),
+        })
+    }
+
+    fn export_text(&self, presets: &[Preset]) -> Result<String, BackendError> {
+        let doc = PresetsDocument {
+            version: 1,
+            presets: presets.iter().map(PresetFile::from).collect(),
+        };
+        let body = toml::to_string_pretty(&doc)
+            .map_err(|error| BackendError::Failed(format!("cannot encode presets: {error}")))?;
+        Ok(format!("{EXPORT_HEADER}{body}"))
+    }
+
+    fn parse_text(&self, text: &str) -> Result<Vec<Preset>, BackendError> {
+        let doc: PresetsDocument = toml::from_str(text)
+            .map_err(|error| BackendError::Failed(format!("cannot parse presets: {error}")))?;
+        if doc.version != 1 {
+            return Err(BackendError::Failed(format!(
+                "unsupported presets file version {}",
+                doc.version
+            )));
+        }
+        doc.presets.into_iter().map(Preset::try_from).collect()
+    }
+
+    fn location(&self) -> String {
+        self.path.display().to_string()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct PresetsDocument {
+    version: u32,
+    #[serde(default)]
+    presets: Vec<PresetFile>,
+}
+
+const EXPORT_HEADER: &str = "\
+# dispcontrol presets - edit freely, then import with `dispcontrol preset import <file>`.
+# Each [[presets]] block is one preset; each [[presets.entries]] block is one saved control.
+#   monitor: monitor id (see `dispcontrol list`)
+#   control: brightness | contrast | volume | gain-red | gain-green | gain-blue |
+#            color-preset | input | power
+#   kind:    \"normalized\" (percent, 0-100) for brightness, contrast, volume and gains;
+#            \"enum\" (the monitor's native value, e.g. input 49 = 0x31 USB-C) for the others
+#   color-preset: 1 sRGB, 2 native, 5 6500K, 6 7500K, 8 9300K, 11-13 user profiles, ...
+#   gain-* entries only take effect with a user profile (11-13); with any other
+#   color-preset they are ignored, because writing a gain selects the user profile.
+# Preset names are case-insensitive and 1-40 characters.
+";
 
 fn validate(settings: &AppSettings) -> Result<(), BackendError> {
     if !(150..=2000).contains(&settings.debounce_ms) {
@@ -190,5 +374,77 @@ mod tests {
         let backup_file: SettingsFile = toml::from_str(&backup_content).unwrap();
         assert_eq!(AppSettings::try_from(backup_file).unwrap(), original);
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn presets_round_trip_and_settings_and_presets_preserve_each_other() {
+        let unique = format!(
+            "dispcontrol-presets-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let directory = std::env::temp_dir().join(unique);
+        let repository = FileSettingsRepository::new(directory.join("config.toml"));
+        assert!(repository.load_presets().unwrap().is_empty());
+
+        let monitor = MonitorId::new("mon").unwrap();
+        let presets = vec![Preset {
+            name: "Night".into(),
+            entries: vec![
+                PresetEntry {
+                    monitor: monitor.clone(),
+                    control: ControlKey::Brightness,
+                    value: ControlValue::Normalized(20),
+                },
+                PresetEntry {
+                    monitor,
+                    control: ControlKey::ColorPreset,
+                    value: ControlValue::Enum(5),
+                },
+            ],
+        }];
+        repository.save_presets(&presets).unwrap();
+        let settings = AppSettings {
+            debounce_ms: 800,
+            ..AppSettings::default()
+        };
+        repository.save(&settings).unwrap();
+
+        assert_eq!(repository.load_presets().unwrap(), presets);
+        assert_eq!(repository.load().unwrap(), settings);
+        repository.save_presets(&[]).unwrap();
+        assert_eq!(repository.load().unwrap(), settings);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn invalid_preset_values_are_rejected_on_load() {
+        let text = "version = 1\ndebounce_ms = 600\nconfirm_input_change = true\ninput_revert_seconds = 15\nlive_preview = false\n[[presets]]\nname = \"Bad\"\n[[presets.entries]]\nmonitor = \"m\"\ncontrol = \"brightness\"\nkind = \"normalized\"\nvalue = 500\n";
+        let file: ConfigFile = toml::from_str(text).unwrap();
+        let result: Result<Vec<_>, _> = file.presets.into_iter().map(Preset::try_from).collect();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn exported_presets_round_trip_and_reject_bad_documents() {
+        let repository = FileSettingsRepository::new("unused.toml");
+        let presets = vec![Preset {
+            name: "Day".into(),
+            entries: vec![PresetEntry {
+                monitor: MonitorId::new("L32p-30#0").unwrap(),
+                control: ControlKey::Brightness,
+                value: ControlValue::Normalized(70),
+            }],
+        }];
+        let text = repository.export_text(&presets).unwrap();
+        assert!(text.starts_with("# dispcontrol presets"));
+        assert_eq!(repository.parse_text(&text).unwrap(), presets);
+        assert!(repository.parse_text("version = 2").is_err());
+        assert!(repository.parse_text("not toml [").is_err());
+        let bad = text.replace("value = 70", "value = 700");
+        assert!(repository.parse_text(&bad).is_err());
     }
 }

@@ -4,8 +4,8 @@ mod windows_pipe;
 use std::fmt;
 use std::str::FromStr;
 
-use dispcontrol_app::{BackendError, MonitorService, UseCaseError};
-use dispcontrol_domain::{AppSettings, ControlKey, ControlValue, MonitorId};
+use dispcontrol_app::{ApplyReport, BackendError, EntryStatus, MonitorService, UseCaseError};
+use dispcontrol_domain::{AppSettings, ControlKey, ControlValue, MonitorId, Preset, PresetEntry};
 use serde::{Deserialize, Serialize};
 
 const MAX_MESSAGE_SIZE: usize = 1_048_576;
@@ -27,6 +27,102 @@ enum Request {
     SettingsSet {
         settings: SettingsDto,
     },
+    PresetList,
+    PresetApply {
+        name: String,
+    },
+    PresetSave {
+        name: String,
+        monitor: Option<String>,
+        #[serde(default)]
+        include_input: bool,
+    },
+    PresetDelete {
+        name: String,
+    },
+    PresetRename {
+        name: String,
+        new_name: String,
+    },
+    PresetMove {
+        name: String,
+        offset: i32,
+    },
+    PresetCycle {
+        #[serde(default = "default_forward")]
+        forward: bool,
+    },
+    PresetSetEntry {
+        name: String,
+        monitor: String,
+        control: String,
+        value: RequestValue,
+    },
+    PresetRemoveEntry {
+        name: String,
+        monitor: String,
+        control: String,
+    },
+    PresetExport,
+    PresetImport {
+        text: String,
+        #[serde(default)]
+        replace: bool,
+    },
+    PresetPath,
+}
+
+fn default_forward() -> bool {
+    true
+}
+
+fn report_to_json(report: &ApplyReport) -> serde_json::Value {
+    let entries: Vec<_> = report
+        .outcomes
+        .iter()
+        .map(|outcome| {
+            let (status, detail) = match &outcome.status {
+                EntryStatus::Applied => ("applied", None),
+                EntryStatus::Unchanged => ("unchanged", None),
+                EntryStatus::Skipped(reason) => ("skipped", Some(reason.as_str())),
+                EntryStatus::Failed(reason) => ("failed", Some(reason.as_str())),
+            };
+            serde_json::json!({
+                "monitor": outcome.entry.monitor.as_str(),
+                "control": outcome.entry.control.as_str(),
+                "status": status,
+                "detail": detail,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "preset": report.preset,
+        "applied": report.applied(),
+        "unchanged": report.unchanged(),
+        "skipped": report.skipped(),
+        "failed": report.failed(),
+        "entries": entries,
+    })
+}
+
+fn preset_to_json(preset: &Preset) -> serde_json::Value {
+    let entries: Vec<_> = preset
+        .entries
+        .iter()
+        .map(|entry| {
+            let (kind, value) = match entry.value {
+                ControlValue::Normalized(value) => ("normalized", value),
+                ControlValue::Enum(value) => ("enum", value),
+            };
+            serde_json::json!({
+                "monitor": entry.monitor.as_str(),
+                "control": entry.control.as_str(),
+                "kind": kind,
+                "value": value,
+            })
+        })
+        .collect();
+    serde_json::json!({ "name": preset.name, "entries": entries })
 }
 
 #[derive(Deserialize)]
@@ -202,6 +298,127 @@ fn dispatch_inner(
                 .map_err(DispatchError::from_use_case)?;
             Ok(serde_json::json!({ "saved": true }))
         }
+        Request::PresetList => {
+            let presets = service
+                .list_presets()
+                .map_err(DispatchError::from_use_case)?;
+            Ok(serde_json::Value::Array(
+                presets.iter().map(preset_to_json).collect(),
+            ))
+        }
+        Request::PresetApply { name } => {
+            let report = service
+                .apply_preset(&name)
+                .map_err(DispatchError::from_use_case)?;
+            Ok(report_to_json(&report))
+        }
+        Request::PresetSave {
+            name,
+            monitor,
+            include_input,
+        } => {
+            let monitor = match monitor {
+                Some(monitor) => MonitorId::new(monitor)
+                    .map_err(|error| DispatchError::new(2, error.to_string()))?,
+                None => service
+                    .list_monitors()
+                    .map_err(DispatchError::from_use_case)?
+                    .into_iter()
+                    .next()
+                    .map(|monitor| monitor.id)
+                    .ok_or_else(|| DispatchError::new(3, "no monitors found".into()))?,
+            };
+            let preset = service
+                .capture_preset(&name, &monitor, include_input)
+                .map_err(DispatchError::from_use_case)?;
+            Ok(preset_to_json(&preset))
+        }
+        Request::PresetDelete { name } => {
+            service
+                .delete_preset(&name)
+                .map_err(DispatchError::from_use_case)?;
+            Ok(serde_json::json!({ "deleted": true }))
+        }
+        Request::PresetRename { name, new_name } => {
+            service
+                .rename_preset(&name, &new_name)
+                .map_err(DispatchError::from_use_case)?;
+            Ok(serde_json::json!({ "renamed": true }))
+        }
+        Request::PresetMove { name, offset } => {
+            service
+                .move_preset(&name, offset)
+                .map_err(DispatchError::from_use_case)?;
+            Ok(serde_json::json!({ "moved": true }))
+        }
+        Request::PresetSetEntry {
+            name,
+            monitor,
+            control,
+            value,
+        } => {
+            let monitor = MonitorId::new(monitor)
+                .map_err(|error| DispatchError::new(2, error.to_string()))?;
+            let control = ControlKey::from_str(&control)
+                .map_err(|error| DispatchError::new(2, error.to_string()))?;
+            let value = match value {
+                RequestValue::Normalized(value) => ControlValue::Normalized(value),
+                RequestValue::Enum(value) => ControlValue::Enum(value),
+            };
+            service
+                .set_preset_entry(
+                    &name,
+                    PresetEntry {
+                        monitor,
+                        control,
+                        value,
+                    },
+                )
+                .map_err(DispatchError::from_use_case)?;
+            Ok(serde_json::json!({ "saved": true }))
+        }
+        Request::PresetRemoveEntry {
+            name,
+            monitor,
+            control,
+        } => {
+            let monitor = MonitorId::new(monitor)
+                .map_err(|error| DispatchError::new(2, error.to_string()))?;
+            let control = ControlKey::from_str(&control)
+                .map_err(|error| DispatchError::new(2, error.to_string()))?;
+            service
+                .remove_preset_entry(&name, &monitor, control)
+                .map_err(DispatchError::from_use_case)?;
+            Ok(serde_json::json!({ "removed": true }))
+        }
+        Request::PresetExport => {
+            let text = service
+                .export_presets()
+                .map_err(DispatchError::from_use_case)?;
+            Ok(serde_json::json!({ "text": text }))
+        }
+        Request::PresetImport { text, replace } => {
+            let summary = service
+                .import_presets(&text, replace)
+                .map_err(|error| match error {
+                    UseCaseError::Backend(BackendError::Failed(message)) => {
+                        DispatchError::new(2, message)
+                    }
+                    other => DispatchError::from_use_case(other),
+                })?;
+            Ok(serde_json::json!({
+                "added": summary.added,
+                "updated": summary.updated,
+                "discarded": summary.removed,
+            }))
+        }
+        Request::PresetPath => Ok(serde_json::json!({ "path": service.presets_location() })),
+        Request::PresetCycle { forward } => {
+            let report = service
+                .cycle_preset(forward)
+                .map_err(DispatchError::from_use_case)?;
+            Ok(report_to_json(&report))
+        }
     }
 }
 
@@ -212,14 +429,17 @@ impl DispatchError {
 
     fn from_use_case(error: UseCaseError) -> Self {
         let code = match &error {
-            UseCaseError::Backend(BackendError::NotFound(_)) => 3,
+            UseCaseError::Backend(BackendError::NotFound(_)) | UseCaseError::PresetNotFound(_) => 3,
             UseCaseError::Backend(BackendError::NotResponding(_)) => 4,
             UseCaseError::InputChangeDeclined | UseCaseError::InputChangeReverted => 6,
             UseCaseError::UnsupportedControl(_)
+            | UseCaseError::PresetExists(_)
             | UseCaseError::Domain(
                 dispcontrol_domain::DomainError::NormalizedValueOutOfRange(_)
                 | dispcontrol_domain::DomainError::EnumValueUnavailable { .. }
-                | dispcontrol_domain::DomainError::UnknownControl(_),
+                | dispcontrol_domain::DomainError::UnknownControl(_)
+                | dispcontrol_domain::DomainError::InvalidNumericCapability(_)
+                | dispcontrol_domain::DomainError::InvalidPresetName,
             )
             | UseCaseError::SettingsInvalid(_) => 2,
             _ => 1,
@@ -254,7 +474,8 @@ pub use windows_pipe::{serve_forever, transact};
 mod tests {
     use super::*;
     use dispcontrol_app::{
-        BackendError, Clock, InputChangePrompter, MonitorBackend, SettingsRepository,
+        BackendError, Clock, InputChangePrompter, MonitorBackend, PresetRepository,
+        SettingsRepository,
     };
     use dispcontrol_domain::{ControlCapability, Monitor, MonitorId};
     use std::sync::{Arc, Mutex};
@@ -316,6 +537,20 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct MemoryPresets(Mutex<Vec<Preset>>);
+
+    impl PresetRepository for MemoryPresets {
+        fn load_presets(&self) -> Result<Vec<Preset>, BackendError> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+
+        fn save_presets(&self, presets: &[Preset]) -> Result<(), BackendError> {
+            *self.0.lock().unwrap() = presets.to_vec();
+            Ok(())
+        }
+    }
+
     struct NoPrompts;
 
     impl InputChangePrompter for NoPrompts {
@@ -355,6 +590,7 @@ mod tests {
         MonitorService::new(
             backend,
             Arc::new(MemorySettings(Mutex::new(AppSettings::default()))),
+            Arc::new(MemoryPresets::default()),
             Arc::new(NoPrompts),
             Arc::new(TestClock),
         )
@@ -428,6 +664,83 @@ mod tests {
         assert_eq!(read_back["result"]["debounce_ms"], 800);
         assert_eq!(read_back["result"]["confirm_input_change"], false);
         assert_eq!(read_back["result"]["input_revert_seconds"], 0);
+    }
+
+    fn call(service: &MonitorService, request: &str) -> serde_json::Value {
+        serde_json::from_slice(&dispatch(service, request.as_bytes())).unwrap()
+    }
+
+    #[test]
+    fn dispatch_saves_lists_applies_and_deletes_presets() {
+        let service = service();
+        let saved = call(&service, r#"{"op":"preset_save","name":"Day"}"#);
+        assert_eq!(saved["ok"], true);
+        assert_eq!(saved["result"]["entries"][0]["control"], "brightness");
+
+        let listed = call(&service, r#"{"op":"preset_list"}"#);
+        assert_eq!(listed["result"][0]["name"], "Day");
+
+        let applied = call(&service, r#"{"op":"preset_apply","name":"day"}"#);
+        assert_eq!(applied["ok"], true);
+        assert_eq!(applied["result"]["unchanged"], 1);
+        assert_eq!(applied["result"]["failed"], 0);
+
+        assert_eq!(
+            call(&service, r#"{"op":"preset_delete","name":"Day"}"#)["ok"],
+            true
+        );
+        let missing = call(&service, r#"{"op":"preset_apply","name":"Day"}"#);
+        assert_eq!(missing["ok"], false);
+        assert_eq!(missing["code"], 3);
+    }
+
+    #[test]
+    fn dispatch_rejects_invalid_and_duplicate_preset_names() {
+        let service = service();
+        assert_eq!(
+            call(&service, r#"{"op":"preset_save","name":"  "}"#)["code"],
+            2
+        );
+        call(&service, r#"{"op":"preset_save","name":"A"}"#);
+        call(&service, r#"{"op":"preset_save","name":"B"}"#);
+        let duplicate = call(
+            &service,
+            r#"{"op":"preset_rename","name":"A","new_name":"b"}"#,
+        );
+        assert_eq!(duplicate["code"], 2);
+    }
+
+    #[test]
+    fn dispatch_edits_and_removes_preset_entries() {
+        let service = service();
+        call(&service, r#"{"op":"preset_save","name":"A"}"#);
+        let set = call(
+            &service,
+            r#"{"op":"preset_set_entry","name":"a","monitor":"m","control":"brightness","value":{"kind":"normalized","value":42}}"#,
+        );
+        assert_eq!(set["ok"], true);
+        let listed = call(&service, r#"{"op":"preset_list"}"#);
+        let entries = listed["result"][0]["entries"].as_array().unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|e| e["monitor"] == "m" && e["control"] == "brightness" && e["value"] == 42)
+        );
+        let invalid = call(
+            &service,
+            r#"{"op":"preset_set_entry","name":"A","monitor":"m","control":"brightness","value":{"kind":"normalized","value":101}}"#,
+        );
+        assert_eq!(invalid["code"], 2);
+        let removed = call(
+            &service,
+            r#"{"op":"preset_remove_entry","name":"A","monitor":"m","control":"brightness"}"#,
+        );
+        assert_eq!(removed["ok"], true);
+        let again = call(
+            &service,
+            r#"{"op":"preset_remove_entry","name":"A","monitor":"m","control":"brightness"}"#,
+        );
+        assert_eq!(again["code"], 3);
     }
 }
 

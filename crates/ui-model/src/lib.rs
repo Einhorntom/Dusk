@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use dispcontrol_app::{Api, UseCaseError};
+use dispcontrol_app::{Api, ApplyReport, ImportSummary, UseCaseError};
 use dispcontrol_domain::{
-    AppSettings, ControlKey, ControlReading, ControlValue, Monitor, MonitorId,
+    AppSettings, ControlKey, ControlReading, ControlValue, Monitor, MonitorId, Preset, PresetEntry,
 };
 
 const CONTROLS: [ControlKey; 9] = [
@@ -26,6 +26,8 @@ pub struct MonitorSettingsModel {
     selected_control: Option<ControlKey>,
     available_controls: Vec<ControlReading>,
     settings: AppSettings,
+    presets: Vec<Preset>,
+    matching_preset: Option<String>,
     last_error: Option<String>,
 }
 
@@ -38,6 +40,8 @@ impl MonitorSettingsModel {
             selected_control: None,
             available_controls: Vec::new(),
             settings: AppSettings::default(),
+            presets: Vec::new(),
+            matching_preset: None,
             last_error: None,
         }
     }
@@ -115,6 +119,94 @@ impl MonitorSettingsModel {
     pub fn update_settings(&mut self, settings: AppSettings) -> Result<(), UseCaseError> {
         self.api.update_settings(settings.clone())?;
         self.settings = settings;
+        Ok(())
+    }
+
+    pub fn refresh_presets(&mut self) -> Result<(), UseCaseError> {
+        self.presets = self.api.list_presets()?;
+        self.matching_preset = self.api.matching_preset().unwrap_or(None);
+        Ok(())
+    }
+
+    pub fn presets(&self) -> &[Preset] {
+        &self.presets
+    }
+
+    pub fn matching_preset(&self) -> Option<&str> {
+        self.matching_preset.as_deref()
+    }
+
+    pub fn apply_preset(&mut self, name: &str) -> Result<ApplyReport, UseCaseError> {
+        let report = self.api.apply_preset(name)?;
+        self.after_preset_change()?;
+        Ok(report)
+    }
+
+    pub fn save_current_as_preset(
+        &mut self,
+        name: &str,
+        include_input: bool,
+    ) -> Result<Preset, UseCaseError> {
+        let monitor = self
+            .selected_monitor
+            .clone()
+            .ok_or(UseCaseError::SettingsInvalid("no monitor is selected"))?;
+        let preset = self.api.capture_preset(name, &monitor, include_input)?;
+        self.refresh_presets()?;
+        Ok(preset)
+    }
+
+    pub fn delete_preset(&mut self, name: &str) -> Result<(), UseCaseError> {
+        self.api.delete_preset(name)?;
+        self.refresh_presets()
+    }
+
+    pub fn rename_preset(&mut self, name: &str, new_name: &str) -> Result<(), UseCaseError> {
+        self.api.rename_preset(name, new_name)?;
+        self.refresh_presets()
+    }
+
+    pub fn move_preset(&mut self, name: &str, offset: i32) -> Result<(), UseCaseError> {
+        self.api.move_preset(name, offset)?;
+        self.refresh_presets()
+    }
+
+    pub fn set_preset_entry(&mut self, name: &str, entry: PresetEntry) -> Result<(), UseCaseError> {
+        self.api.set_preset_entry(name, entry)?;
+        self.refresh_presets()
+    }
+
+    pub fn remove_preset_entry(
+        &mut self,
+        name: &str,
+        monitor: &MonitorId,
+        control: ControlKey,
+    ) -> Result<(), UseCaseError> {
+        self.api.remove_preset_entry(name, monitor, control)?;
+        self.refresh_presets()
+    }
+
+    pub fn export_presets(&self) -> Result<String, UseCaseError> {
+        self.api.export_presets()
+    }
+
+    pub fn import_presets(
+        &mut self,
+        text: &str,
+        replace: bool,
+    ) -> Result<ImportSummary, UseCaseError> {
+        let summary = self.api.import_presets(text, replace)?;
+        self.refresh_presets()?;
+        Ok(summary)
+    }
+
+    pub fn presets_location(&self) -> String {
+        self.api.presets_location()
+    }
+
+    fn after_preset_change(&mut self) -> Result<(), UseCaseError> {
+        self.refresh_controls()?;
+        self.matching_preset = self.api.matching_preset().unwrap_or(None);
         Ok(())
     }
 

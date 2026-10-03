@@ -27,7 +27,8 @@ Both Settings presentations use the same view model and application API. The def
 
 ## Next implementation steps
 
-1. Start v1 (presets, hotkeys, integrations); see the release plan below.
+1. v1 presets are implemented (see below). Next: global hotkeys, then PowerToys Run / Command Palette integrations.
+2. Supervised hardware/UI acceptance of the Presets page is still pending: Day/Night switching must keep the 7500 K colour preset, the Edit page and Export/Import buttons need a visual check, and the 800 ms colour-mode settle may need tuning.
 
 ## Release plan and version scope
 
@@ -49,7 +50,9 @@ This section is the roadmap for what each release contains. The implementation c
 - Persist settings; make the mock-matching Settings presentation the default and retain the compact native layout as the opt-in `dispcontrold --native-ui` fallback.
 - Release gate: implement and visually review the mock-matching UI, then complete supervised Windows acceptance for Settings persistence, tray behavior, and safe input confirmation/revert on the reference setup. Current test/build/runtime results and outstanding checks are in the sections above.
 
-### v1 — presets, hotkeys, and integrations (planned)
+### v1 — presets, hotkeys, and integrations (in progress)
+
+**Done:** presets (domain, app, TOML store, IPC `preset_*` ops, CLI `preset list|apply|next|prev|save|delete|rename|move` with exit 5 on partial failure, Presets page in the default UI), per-preset value editor (UI "Edit" page, CLI `preset set|unset`), TOML export/import (CLI `preset export|import|path`, UI buttons using `dispcontrol-presets.toml` next to `config.toml`), plan-then-write apply (one read pass, then back-to-back writes; values after a colour-mode switch are rewritten after one 800 ms settle), and the colour-preset fix (gains ignored under a fixed colour preset, SPEC-PRE-4a). Fmt, clippy and the full test suite pass; the CLI save/apply/delete round trip was smoke-tested on the reference monitor (apply was a no-op, values already matched). Not yet verified: Presets page visually, applying a preset that changes real values. **Remaining:** hotkeys, PowerToys integrations.
 
 - Save, capture, edit, rename, delete, reorder, and apply named monitor configurations.
 - Add configurable global hotkeys for preset selection/cycling and supported control adjustments; report registration conflicts.
@@ -83,7 +86,7 @@ Latest recorded verification for the Windows GNU target:
 - `cargo test --workspace --target x86_64-pc-windows-gnu`
 - `cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings`
 - `cargo build --workspace --bins --target x86_64-pc-windows-gnu`
-- 28 workspace tests pass, including deterministic quiet-period/coalescing/rate-limit/input-revert tests, IPC dispatch success/error and settings persistence, CLI JSON usage cases, and settings-file replacement/backup behavior.
+- 47 workspace tests pass, including deterministic quiet-period/coalescing/rate-limit/input-revert tests, IPC dispatch success/error and settings persistence, CLI JSON usage cases, and settings-file replacement/backup behavior.
 - Runtime smoke checks: CLI reports exit code 7 with a JSON error when the daemon is absent; with the daemon running, monitor listing, brightness read, settings JSON, 20 sequential requests, and 20 concurrent CLI/IPC requests succeeded. The default window opened at 880x720; `--native-ui` opened at 760x640; both served CLI requests. Closing the Settings window hid it without stopping the daemon, and the tray-icon left-click message restored it. An invalid daemon argument exits with code 1.
 
 No physical monitor input switch was performed during these checks. Manual acceptance of tray behavior (including Quit), settings persistence, input confirmation/revert and the colour-preset fix was completed by the owner on the reference setup; v0 is accepted.
