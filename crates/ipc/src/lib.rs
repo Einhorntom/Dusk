@@ -4,7 +4,7 @@ mod windows_pipe;
 use std::fmt;
 use std::str::FromStr;
 
-use dispcontrol_app::{MonitorService, UseCaseError};
+use dispcontrol_app::{BackendError, MonitorService, UseCaseError};
 use dispcontrol_domain::{AppSettings, ControlKey, ControlValue, MonitorId};
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +72,8 @@ struct Response {
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
 
@@ -102,30 +104,41 @@ pub fn dispatch(service: &MonitorService, input: &[u8]) -> Vec<u8> {
         Ok(value) => Response {
             ok: true,
             result: Some(value),
+            code: None,
             error: None,
         },
-        Err(message) => Response {
+        Err(error) => Response {
             ok: false,
             result: None,
-            error: Some(message),
+            code: Some(error.code),
+            error: Some(error.message),
         },
     };
     serde_json::to_vec(&response).unwrap_or_else(|error| {
         format!(
-            "{{\"ok\":false,\"error\":\"could not encode response: {}\"}}",
+            "{{\"ok\":false,\"code\":1,\"error\":\"could not encode response: {}\"}}",
             error
         )
         .into_bytes()
     })
 }
 
-fn dispatch_inner(service: &MonitorService, input: &[u8]) -> Result<serde_json::Value, String> {
-    let request: Request = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+struct DispatchError {
+    code: i32,
+    message: String,
+}
+
+fn dispatch_inner(
+    service: &MonitorService,
+    input: &[u8],
+) -> Result<serde_json::Value, DispatchError> {
+    let request: Request =
+        serde_json::from_slice(input).map_err(|error| DispatchError::new(2, error.to_string()))?;
     match request {
         Request::List => {
             let monitors = service
                 .list_monitors()
-                .map_err(format_use_case_error)?
+                .map_err(DispatchError::from_use_case)?
                 .into_iter()
                 .map(|monitor| MonitorDto {
                     id: monitor.id.to_string(),
@@ -133,14 +146,16 @@ fn dispatch_inner(service: &MonitorService, input: &[u8]) -> Result<serde_json::
                     unstable_id: monitor.unstable_id,
                 })
                 .collect::<Vec<_>>();
-            serde_json::to_value(monitors).map_err(|error| error.to_string())
+            serde_json::to_value(monitors).map_err(|error| DispatchError::new(1, error.to_string()))
         }
         Request::Get { monitor, control } => {
-            let monitor = MonitorId::new(monitor).map_err(|error| error.to_string())?;
-            let control = ControlKey::from_str(&control).map_err(|error| error.to_string())?;
+            let monitor = MonitorId::new(monitor)
+                .map_err(|error| DispatchError::new(2, error.to_string()))?;
+            let control = ControlKey::from_str(&control)
+                .map_err(|error| DispatchError::new(2, error.to_string()))?;
             let reading = service
                 .read(&monitor, control)
-                .map_err(format_use_case_error)?;
+                .map_err(DispatchError::from_use_case)?;
             let value = match reading.value {
                 ControlValue::Normalized(value) => value.to_string(),
                 ControlValue::Enum(value) => value.to_string(),
@@ -152,26 +167,29 @@ fn dispatch_inner(service: &MonitorService, input: &[u8]) -> Result<serde_json::
                 native_max: reading.capability.native_max,
                 enum_values: reading.capability.enum_values,
             })
-            .map_err(|error| error.to_string())
+            .map_err(|error| DispatchError::new(1, error.to_string()))
         }
         Request::Set {
             monitor,
             control,
             value,
         } => {
-            let monitor = MonitorId::new(monitor).map_err(|error| error.to_string())?;
-            let control = ControlKey::from_str(&control).map_err(|error| error.to_string())?;
+            let monitor = MonitorId::new(monitor)
+                .map_err(|error| DispatchError::new(2, error.to_string()))?;
+            let control = ControlKey::from_str(&control)
+                .map_err(|error| DispatchError::new(2, error.to_string()))?;
             let value = match value {
                 RequestValue::Normalized(value) => ControlValue::Normalized(value),
                 RequestValue::Enum(value) => ControlValue::Enum(value),
             };
             let changed = service
                 .set(&monitor, control, value)
-                .map_err(format_use_case_error)?;
-            serde_json::to_value(SetDto { changed }).map_err(|error| error.to_string())
+                .map_err(DispatchError::from_use_case)?;
+            serde_json::to_value(SetDto { changed })
+                .map_err(|error| DispatchError::new(1, error.to_string()))
         }
         Request::SettingsGet => {
-            let settings = service.settings().map_err(format_use_case_error)?;
+            let settings = service.settings().map_err(DispatchError::from_use_case)?;
             Ok(serde_json::json!({
                 "debounce_ms": settings.debounce_ms,
                 "confirm_input_change": settings.confirm_input_change,
@@ -181,14 +199,33 @@ fn dispatch_inner(service: &MonitorService, input: &[u8]) -> Result<serde_json::
         Request::SettingsSet { settings } => {
             service
                 .update_settings(settings.into())
-                .map_err(format_use_case_error)?;
+                .map_err(DispatchError::from_use_case)?;
             Ok(serde_json::json!({ "saved": true }))
         }
     }
 }
 
-fn format_use_case_error(error: UseCaseError) -> String {
-    error.to_string()
+impl DispatchError {
+    fn new(code: i32, message: String) -> Self {
+        Self { code, message }
+    }
+
+    fn from_use_case(error: UseCaseError) -> Self {
+        let code = match &error {
+            UseCaseError::Backend(BackendError::NotFound(_)) => 3,
+            UseCaseError::Backend(BackendError::NotResponding(_)) => 4,
+            UseCaseError::InputChangeDeclined | UseCaseError::InputChangeReverted => 6,
+            UseCaseError::UnsupportedControl(_)
+            | UseCaseError::Domain(
+                dispcontrol_domain::DomainError::NormalizedValueOutOfRange(_)
+                | dispcontrol_domain::DomainError::EnumValueUnavailable { .. }
+                | dispcontrol_domain::DomainError::UnknownControl(_),
+            )
+            | UseCaseError::SettingsInvalid(_) => 2,
+            _ => 1,
+        };
+        Self::new(code, error.to_string())
+    }
 }
 
 #[derive(Debug)]
@@ -216,6 +253,112 @@ pub use windows_pipe::{serve_forever, transact};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dispcontrol_app::{
+        BackendError, Clock, InputChangePrompter, MonitorBackend, SettingsRepository,
+    };
+    use dispcontrol_domain::{ControlCapability, Monitor, MonitorId};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    struct FakeBackend {
+        monitor: Monitor,
+    }
+
+    impl MonitorBackend for FakeBackend {
+        fn list_monitors(&self) -> Result<Vec<Monitor>, BackendError> {
+            Ok(vec![self.monitor.clone()])
+        }
+
+        fn read_control(
+            &self,
+            monitor: &MonitorId,
+            control: ControlKey,
+        ) -> Result<Option<(ControlCapability, u32)>, BackendError> {
+            if monitor != &self.monitor.id {
+                return Err(BackendError::NotFound(format!(
+                    "monitor not found: {monitor}"
+                )));
+            }
+            if control != ControlKey::Brightness {
+                return Ok(None);
+            }
+            Ok(Some((
+                ControlCapability {
+                    key: control,
+                    native_min: 0,
+                    native_max: 100,
+                    enum_values: Vec::new(),
+                },
+                50,
+            )))
+        }
+
+        fn write_control(
+            &self,
+            _monitor: &MonitorId,
+            _control: ControlKey,
+            _native_value: u32,
+        ) -> Result<(), BackendError> {
+            Ok(())
+        }
+    }
+
+    struct MemorySettings(Mutex<AppSettings>);
+
+    impl SettingsRepository for MemorySettings {
+        fn load(&self) -> Result<AppSettings, BackendError> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+
+        fn save(&self, settings: &AppSettings) -> Result<(), BackendError> {
+            *self.0.lock().unwrap() = settings.clone();
+            Ok(())
+        }
+    }
+
+    struct NoPrompts;
+
+    impl InputChangePrompter for NoPrompts {
+        fn confirm_input_change(&self, _monitor: &Monitor, _from: u32, _to: u32) -> bool {
+            false
+        }
+
+        fn confirm_keep_input(
+            &self,
+            _monitor: &Monitor,
+            _previous_input: u32,
+            _new_input: u32,
+            _timeout_seconds: u32,
+        ) -> Result<bool, String> {
+            Ok(false)
+        }
+    }
+
+    struct TestClock;
+
+    impl Clock for TestClock {
+        fn now(&self) -> Instant {
+            Instant::now()
+        }
+
+        fn sleep(&self, _duration: Duration) {}
+    }
+
+    fn service() -> MonitorService {
+        let backend = Arc::new(FakeBackend {
+            monitor: Monitor {
+                id: MonitorId::new("fake-0").unwrap(),
+                name: "Fake display".into(),
+                unstable_id: false,
+            },
+        });
+        MonitorService::new(
+            backend,
+            Arc::new(MemorySettings(Mutex::new(AppSettings::default()))),
+            Arc::new(NoPrompts),
+            Arc::new(TestClock),
+        )
+    }
 
     #[test]
     fn settings_dto_round_trips_values() {
@@ -228,17 +371,63 @@ mod tests {
     #[test]
     fn invalid_request_is_reported_as_error_response() {
         let response: serde_json::Value =
-            serde_json::from_slice(&dispatch_unreachable_for_this_test()).unwrap();
+            serde_json::from_slice(&dispatch(&service(), b"{")).unwrap();
         assert_eq!(response["ok"], false);
+        assert_eq!(response["code"], 2);
+        assert!(response["error"].as_str().unwrap().contains("EOF"));
     }
 
-    fn dispatch_unreachable_for_this_test() -> Vec<u8> {
-        serde_json::to_vec(&Response {
-            ok: false,
-            result: None,
-            error: Some("invalid request".into()),
-        })
-        .unwrap()
+    #[test]
+    fn dispatch_lists_monitors_in_the_wire_response() {
+        let response: serde_json::Value =
+            serde_json::from_slice(&dispatch(&service(), br#"{"op":"list"}"#)).unwrap();
+        assert_eq!(response["ok"], true);
+        assert_eq!(response["result"][0]["id"], "fake-0");
+        assert!(response.get("code").is_none());
+    }
+
+    #[test]
+    fn dispatch_reports_unsupported_controls_as_wire_errors() {
+        let response: serde_json::Value = serde_json::from_slice(&dispatch(
+            &service(),
+            br#"{"op":"get","monitor":"fake-0","control":"volume"}"#,
+        ))
+        .unwrap();
+        assert_eq!(response["ok"], false);
+        assert_eq!(response["code"], 2);
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .contains("does not support volume")
+        );
+    }
+
+    #[test]
+    fn dispatch_maps_missing_monitor_to_documented_exit_code() {
+        let response: serde_json::Value = serde_json::from_slice(&dispatch(
+            &service(),
+            br#"{"op":"get","monitor":"missing","control":"brightness"}"#,
+        ))
+        .unwrap();
+        assert_eq!(response["ok"], false);
+        assert_eq!(response["code"], 3);
+    }
+
+    #[test]
+    fn dispatch_saves_and_reads_back_settings() {
+        let service = service();
+        let saved: serde_json::Value = serde_json::from_slice(&dispatch(
+            &service,
+            br#"{"op":"settings_set","settings":{"debounce_ms":800,"confirm_input_change":false,"input_revert_seconds":0,"live_preview":false}}"#,
+        ))
+        .unwrap();
+        assert_eq!(saved["ok"], true);
+        let read_back: serde_json::Value =
+            serde_json::from_slice(&dispatch(&service, br#"{"op":"settings_get"}"#)).unwrap();
+        assert_eq!(read_back["result"]["debounce_ms"], 800);
+        assert_eq!(read_back["result"]["confirm_input_change"], false);
+        assert_eq!(read_back["result"]["input_revert_seconds"], 0);
     }
 }
 

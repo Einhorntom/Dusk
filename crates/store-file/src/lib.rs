@@ -163,4 +163,32 @@ mod tests {
         let decoded: SettingsFile = toml::from_str(&text).unwrap();
         assert_eq!(AppSettings::try_from(decoded).unwrap(), original);
     }
+
+    #[test]
+    fn saving_replaces_existing_settings_and_keeps_backup() {
+        let unique = format!(
+            "dispcontrol-settings-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let directory = std::env::temp_dir().join(unique);
+        let path = directory.join("config.toml");
+        let repository = FileSettingsRepository::new(&path);
+        let original = AppSettings::default();
+        repository.save(&original).unwrap();
+
+        let mut changed = original.clone();
+        changed.debounce_ms = 750;
+        repository.save(&changed).unwrap();
+
+        assert_eq!(repository.load().unwrap(), changed);
+        let backup = path.with_extension("toml.bak");
+        let backup_content = fs::read_to_string(backup).unwrap();
+        let backup_file: SettingsFile = toml::from_str(&backup_content).unwrap();
+        assert_eq!(AppSettings::try_from(backup_file).unwrap(), original);
+        fs::remove_dir_all(directory).unwrap();
+    }
 }

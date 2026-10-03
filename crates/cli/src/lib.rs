@@ -78,7 +78,7 @@ fn run_command(args: &[String], json_output: bool) -> Result<String, CliError> {
             parsed["error"]
                 .as_str()
                 .unwrap_or("daemon returned an unspecified error"),
-            1,
+            parsed["code"].as_i64().unwrap_or(1) as i32,
             json_output,
         ));
     }
@@ -128,5 +128,35 @@ fn cli_error(message: &str, exit_code: i32, json_output: bool) -> CliError {
         message,
         exit_code,
         json_output,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_command_with_json_returns_a_json_usage_error_without_ipc() {
+        let args = vec!["--json".into(), "unknown".into()];
+        let error = run(&args).unwrap_err();
+        let response: Value = serde_json::from_str(&error.message).unwrap();
+        assert_eq!(error.exit_code, 2);
+        assert!(error.json_output);
+        assert_eq!(response["ok"], false);
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .contains("invalid command")
+        );
+    }
+
+    #[test]
+    fn invalid_command_without_json_is_a_plain_usage_error() {
+        let args = vec!["unknown".into()];
+        let error = run(&args).unwrap_err();
+        assert_eq!(error.exit_code, 2);
+        assert!(!error.json_output);
+        assert!(error.message.contains("Usage: dispcontrol"));
     }
 }

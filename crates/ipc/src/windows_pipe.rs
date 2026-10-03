@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{FromRawHandle, OwnedHandle, RawHandle};
 use std::path::Path;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -20,8 +21,12 @@ use windows::core::{HRESULT, PCWSTR};
 use crate::{IpcError, MAX_MESSAGE_SIZE};
 
 const PIPE_NAME: &str = r"\\.\pipe\dispcontrol-v0";
+const PIPE_INSTANCE_LIMIT: u32 = 16;
 
-pub fn serve_forever(mut handler: impl FnMut(&[u8]) -> Vec<u8>) -> Result<(), IpcError> {
+pub fn serve_forever(
+    handler: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
+) -> Result<(), IpcError> {
+    let handler = Arc::new(handler);
     let encoded_name = wide_null(PIPE_NAME);
     loop {
         let raw_pipe = unsafe {
@@ -29,7 +34,7 @@ pub fn serve_forever(mut handler: impl FnMut(&[u8]) -> Vec<u8>) -> Result<(), Ip
                 PCWSTR(encoded_name.as_ptr()),
                 PIPE_ACCESS_DUPLEX,
                 NAMED_PIPE_MODE(PIPE_TYPE_BYTE.0 | PIPE_READMODE_BYTE.0 | PIPE_WAIT.0),
-                1,
+                PIPE_INSTANCE_LIMIT,
                 MAX_MESSAGE_SIZE as u32 + 4,
                 MAX_MESSAGE_SIZE as u32 + 4,
                 0,
@@ -39,9 +44,10 @@ pub fn serve_forever(mut handler: impl FnMut(&[u8]) -> Vec<u8>) -> Result<(), Ip
         if raw_pipe == INVALID_HANDLE_VALUE {
             return Err(IpcError::Io(std::io::Error::last_os_error()));
         }
+        let pipe_handle = raw_pipe.0 as isize;
         let handle = unsafe { OwnedHandle::from_raw_handle(raw_pipe.0 as RawHandle) };
         let mut pipe = File::from(handle);
-        let connect_result = unsafe { ConnectNamedPipe(HANDLE(raw_pipe.0), None) };
+        let connect_result = unsafe { ConnectNamedPipe(HANDLE(pipe_handle as _), None) };
         if let Err(error) = connect_result
             && error.code() != HRESULT::from_win32(ERROR_PIPE_CONNECTED.0)
         {
@@ -49,21 +55,24 @@ pub fn serve_forever(mut handler: impl FnMut(&[u8]) -> Vec<u8>) -> Result<(), Ip
             drop(pipe);
             continue;
         }
-        let result = serve_connection(&mut pipe, &mut handler);
-        if let Err(error) = unsafe { DisconnectNamedPipe(HANDLE(raw_pipe.0)) } {
-            eprintln!("warning: DisconnectNamedPipe failed: {error}");
-        }
-        drop(pipe);
-        if let Err(error) = result {
-            eprintln!("warning: named-pipe request failed: {error}");
-        }
+        let handler = handler.clone();
+        thread::Builder::new()
+            .name("dispcontrol-ipc-client".into())
+            .spawn(move || {
+                let result = serve_connection(&mut pipe, handler.as_ref());
+                if let Err(error) = unsafe { DisconnectNamedPipe(HANDLE(pipe_handle as _)) } {
+                    eprintln!("warning: DisconnectNamedPipe failed: {error}");
+                }
+                drop(pipe);
+                if let Err(error) = result {
+                    eprintln!("warning: named-pipe request failed: {error}");
+                }
+            })
+            .map_err(|error| IpcError::Io(std::io::Error::other(error)))?;
     }
 }
 
-fn serve_connection(
-    pipe: &mut File,
-    handler: &mut impl FnMut(&[u8]) -> Vec<u8>,
-) -> Result<(), IpcError> {
+fn serve_connection(pipe: &mut File, handler: &impl Fn(&[u8]) -> Vec<u8>) -> Result<(), IpcError> {
     let request = read_frame(pipe)?;
     let response = handler(&request);
     write_frame(pipe, &response)?;
