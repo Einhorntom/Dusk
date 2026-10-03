@@ -56,8 +56,9 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 - Optional small on-screen indicator showing the new value (can be disabled).
 
 ### 5.6 User interface
-- Lives in the system tray; no main window.
+- Lives in the system tray; there is no always-visible main window and no taskbar button.
 - Clicking the tray icon opens a compact panel with per-monitor sliders, preset buttons and schedule status; it closes when it loses focus.
+- Minimizing any app window (for example Settings) sends it to the notification area's hidden-icons overflow instead of the taskbar; the app keeps running and is reopened from its tray icon.
 - Looks native to Windows 11 and follows the system light/dark theme.
 - Settings: hotkeys, step sizes, schedule, write delay, live preview, start with Windows.
 
@@ -70,8 +71,8 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 - An optional audit log shows how many writes were made per setting.
 
 ### 5.8 Input switching safety
-- The monitor doubles as the user's USB hub, so switching away from USB-C disconnects USB devices on it (e.g. keyboard and mouse).
-- **Switching away from USB-C requires confirmation by default**, with a clear warning.
+- Changing the input can disconnect devices: a monitor that doubles as a USB hub (as in the v1 hardware) drops the USB devices on it (e.g. keyboard and mouse) when the input changes, and an input with no signal can leave the user without a picture.
+- **Any input change away from the currently active input requires confirmation by default**, with a clear warning. The confirmation can be turned off in settings.
 - Input changes offer an automatic revert if the user does not confirm within a timeout (default 10 seconds, configurable).
 
 ### 5.9 Integrations
@@ -122,6 +123,7 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 - Laptop internal-panel brightness control.
 - Preset import/export and sharing.
 - Syncing brightness across multiple monitors.
+- Reliable handling of multiple identical monitors (same model, no serial): stable aliases and sync rules.
 - Mobile/remote control and smart-home integration.
 
 ## 11. Decisions
@@ -132,7 +134,8 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 5. Linux target: Ubuntu.
 6. Scheduling: fixed clock times only.
 7. Live preview: off by default, opt-in.
-8. Switching away from USB-C requires confirmation by default.
+8. Any input change away from the currently active input requires confirmation by default.
+9. Minimizing an app window sends it to the hidden-icons tray overflow, not the taskbar.
 
 ## 12. Open questions
 - None currently.

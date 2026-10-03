@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dispcontrol: Settings (mock)</title>
+<style>
+  :root {
+    --bg: #f3f3f3; --card: #fbfbfb; --card-border: #e5e5e5; --text: #1b1b1b; --muted: #616161;
+    --accent: #0067c0; --accent-text: #fff; --ctl: #fdfdfd; --ctl-border: #d0d0d0; --hover: #ebebeb;
+    --sel: #e6e6e6; --warn-bg: #fff4ce; --warn-border: #f1d98a; --track: #8a8a8a;
+  }
+  body.dark {
+    --bg: #202020; --card: #2b2b2b; --card-border: #3a3a3a; --text: #f3f3f3; --muted: #b0b0b0;
+    --accent: #60cdff; --accent-text: #000; --ctl: #333; --ctl-border: #4a4a4a; --hover: #333;
+    --sel: #383838; --warn-bg: #433519; --warn-border: #6b5520; --track: #9a9a9a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; background: #7a8fa6;
+         min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .window { width: 940px; height: 680px; background: var(--bg); color: var(--text); border-radius: 8px; overflow: hidden;
+            display: flex; flex-direction: column; box-shadow: 0 16px 48px rgba(0,0,0,.35); border: 1px solid var(--card-border); }
+  .titlebar { height: 40px; display: flex; align-items: center; padding-left: 14px; font-size: 12px; user-select: none; }
+  .titlebar .icon { width: 16px; height: 16px; border-radius: 4px; background: var(--accent); margin-right: 10px; }
+  .titlebar .spacer { flex: 1; }
+  .titlebar button { width: 46px; height: 40px; border: 0; background: transparent; color: var(--text); font-size: 13px; }
+  .titlebar button:hover { background: var(--hover); }
+  .titlebar button.close:hover { background: #c42b1c; color: #fff; }
+  .body { flex: 1; display: flex; min-height: 0; }
+  nav { width: 230px; padding: 4px 10px; overflow: auto; }
+  nav .item { display: flex; align-items: center; gap: 12px; padding: 9px 12px; margin-bottom: 2px; border-radius: 6px;
+              cursor: pointer; position: relative; }
+  nav .item:hover { background: var(--hover); }
+  nav .item.active { background: var(--sel); }
+  nav .item.active::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--accent); }
+  nav .glyph { width: 18px; text-align: center; font-size: 15px; }
+  main { flex: 1; overflow: auto; padding: 4px 28px 24px 18px; }
+  h1 { font-size: 26px; font-weight: 600; margin: 4px 0 18px; }
+  h2 { font-size: 14px; font-weight: 600; margin: 22px 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--card-border); border-radius: 6px; margin-bottom: 4px; }
+  .row { display: flex; align-items: center; gap: 16px; padding: 14px 16px; min-height: 58px; }
+  .row + .row { border-top: 1px solid var(--card-border); }
+  .row .label { flex: 1; }
+  .row .label .t { font-size: 14px; }
+  .row .label .d { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  select, input[type=text], input[type=time], input[type=number] {
+    background: var(--ctl); color: var(--text); border: 1px solid var(--ctl-border); border-bottom-color: #8a8a8a;
+    border-radius: 4px; padding: 6px 10px; font: inherit; min-width: 120px; }
+  input[type=number] { min-width: 70px; width: 80px; }
+  input[type=range] { width: 180px; accent-color: var(--accent); }
+  .val { min-width: 54px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .toggle { position: relative; width: 40px; height: 20px; flex: none; }
+  .toggle input { opacity: 0; position: absolute; inset: 0; margin: 0; cursor: pointer; z-index: 1; }
+  .toggle .track { position: absolute; inset: 0; border-radius: 10px; border: 1px solid var(--track); transition: .15s; }
+  .toggle .knob { position: absolute; left: 4px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--track); transition: .15s; }
+  .toggle input:checked ~ .track { background: var(--accent); border-color: var(--accent); }
+  .toggle input:checked ~ .knob { left: 24px; background: var(--accent-text); }
+  .btn { background: var(--ctl); color: var(--text); border: 1px solid var(--ctl-border); border-radius: 4px; padding: 6px 14px; font: inherit; cursor: pointer; }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .btn.danger { color: #c42b1c; }
+  .keys { display: inline-flex; gap: 4px; }
+  kbd { background: var(--ctl); border: 1px solid var(--ctl-border); border-bottom-width: 2px; border-radius: 4px; padding: 2px 7px; font: 12px "Segoe UI", sans-serif; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); padding: 10px 16px; }
+  td { padding: 9px 16px; border-top: 1px solid var(--card-border); }
+  td .btn { padding: 3px 10px; }
+  .days { display: inline-flex; gap: 3px; }
+  .days span { width: 24px; height: 24px; border-radius: 50%; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ctl-border); color: var(--muted); }
+  .days span.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--sel); color: var(--muted); }
+  .badge.ok { background: #dff6dd; color: #0e700e; }
+  body.dark .badge.ok { background: #1e3a1e; color: #8fe08f; }
+  .banner { display: flex; gap: 12px; padding: 12px 16px; background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 6px; margin: 10px 0; font-size: 13px; }
+  .banner.paused { margin-top: 0; }
+  .page { display: none; } .page.active { display: block; }
+  .footer { padding: 10px 28px; font-size: 12px; color: var(--muted); display: flex; gap: 16px; border-top: 1px solid var(--card-border); }
+  .footer .spacer { flex: 1; }
+  .theme { position: fixed; top: 12px; right: 16px; }
+  .sub { padding: 10px 16px 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 3px 10px; border-radius: 12px; background: var(--sel); font-size: 12px; }
+  .audit-bar { height: 8px; border-radius: 4px; background: var(--accent); }
+</style>
+</head>
+<body>
+<button class="btn theme" onclick="document.body.classList.toggle('dark')">Toggle light / dark</button>
+
+<div class="window">
+  <div class="titlebar">
+    <div class="icon"></div>dispcontrol Settings
+    <div class="spacer"></div>
+    <button title="Minimize to hidden-icons tray">&#x2014;</button>
+    <button title="Close hides to tray">&#x2715;</button>
+  </div>
+  <div class="body">
+    <nav id="nav">
+      <div class="item active" data-page="monitors"><span class="glyph">&#x1F5A5;</span>Monitors</div>
+      <div class="item" data-page="presets"><span class="glyph">&#x2630;</span>Presets</div>
+      <div class="item" data-page="schedule"><span class="glyph">&#x1F551;</span>Schedule</div>
+      <div class="item" data-page="hotkeys"><span class="glyph">&#x2328;</span>Hotkeys</div>
+      <div class="item" data-page="safety"><span class="glyph">&#x1F6E1;</span>Safety &amp; writes</div>
+      <div class="item" data-page="general"><span class="glyph">&#x2699;</span>General</div>
+    </nav>
+
+    <main>
+      <!-- MONITORS -->
+      <section class="page active" id="monitors">
+        <h1>Monitors</h1>
+        <div class="row" style="padding-left:0;padding-top:0">
+          <div class="label"><div class="t">Selected monitor</div></div>
+          <select style="min-width:260px"><option>Desk monitor (Lenovo L32p-30)</option><option>Left monitor (Dell U2723QE)</option></select>
+        </div>
+        <div class="card">
+          <div class="row">
+            <div class="label">
+              <div class="t">Lenovo L32p-30 <span class="badge ok">Verified</span></div>
+              <div class="d">Connected over USB-C &middot; ID LEN-L32p30-8F3A21</div>
+            </div>
+            <input type="text" value="Desk monitor" aria-label="Alias">
+          </div>
+          <div class="sub">
+            <div class="d" style="font-size:12px;color:var(--muted);margin-bottom:6px">Supported controls (discovered from the monitor)</div>
+            <div class="chips">
+              <span class="chip">Brightness</span><span class="chip">Contrast</span><span class="chip">Volume</span>
+              <span class="chip">Input source</span><span class="chip">Power</span><span class="chip">Color preset</span><span class="chip">RGB gain</span>
+            </div>
+          </div>
+        </div>
+        <h2>Current settings</h2>
+        <div class="card">
+          <div class="row"><div class="label"><div class="t">Brightness</div></div>
+            <input type="range" min="0" max="100" value="80" oninput="this.nextElementSibling.textContent=this.value+'%'"><span class="val">80%</span></div>
+          <div class="row"><div class="label"><div class="t">Contrast</div></div>
+            <input type="range" min="0" max="100" value="70" oninput="this.nextElementSibling.textContent=this.value+'%'"><span class="val">70%</span></div>
+          <div class="row"><div class="label"><div class="t">Volume</div></div>
+            <input type="range" min="0" max="100" value="30" oninput="this.nextElementSibling.textContent=this.value+'%'"><span class="val">30%</span></div>
+          <div class="row"><div class="label"><div class="t">Input source</div><div class="d">Changing input asks for confirmation (see Safety &amp; writes).</div></div>
+            <select><option>Work laptop (USB-C)</option><option>Console (HDMI 1)</option><option>Docking station (raw-0x1B)</option></select></div>
+          <div class="row"><div class="label"><div class="t">Color preset</div></div>
+            <select><option>Standard</option><option>Warm</option><option>Cool</option><option>sRGB</option><option>User</option></select></div>
+          <div class="row"><div class="label"><div class="t">Red gain</div></div>
+            <input type="range" min="0" max="100" value="50" oninput="this.nextElementSibling.textContent=this.value+'%'"><span class="val">50%</span></div>
+          <div class="row"><div class="label"><div class="t">Green gain</div></div>
+            <input type="range" min="0" max="100" value="50" oninput="this.nextElementSibling.textContent=this.value+'%'"><span class="val">50%</span></div>
+          <div class="row"><div class="label"><div class="t">Blue gain</div></div>
+            <input type="range" min="0" max="100" value="50" oninput="this.nextElementSibling.textContent=this.value+'%'"><span class="val">50%</span></div>
+          <div class="row"><div class="label"><div class="t">Power</div><div class="d">Standby turns the display off.</div></div>
+            <button class="btn">Standby</button><button class="btn primary">On</button></div>
+        </div>
+        <div class="row" style="padding-left:0">
+          <button class="btn primary">Save as preset&hellip;</button>
+          <button class="btn">Re-read from monitor</button>
+          <span class="d" style="font-size:12px;color:var(--muted)">Changes are sent to the monitor 400 ms after you stop adjusting.</span>
+        </div>
+        <h2>Input names</h2>
+        <div class="card">
+          <table>
+            <tr><th>Input</th><th>Friendly name</th><th></th></tr>
+            <tr><td>usbc</td><td><input type="text" value="Work laptop"></td><td></td></tr>
+            <tr><td>hdmi1</td><td><input type="text" value="Console"></td><td></td></tr>
+            <tr><td>raw-0x1B</td><td><input type="text" value="Docking station"></td><td></td></tr>
+          </table>
+        </div>
+        <div class="row" style="padding-left:0">
+          <button class="btn">Refresh monitors</button>
+          <button class="btn">Show discovery details</button>
+        </div>
+      </section>
+
+      <!-- PRESETS -->
+      <section class="page" id="presets">
+        <h1>Presets</h1>
+        <div class="card">
+          <table>
+            <tr><th style="width:36px"></th><th>Name</th><th>Contents</th><th></th></tr>
+            <tr><td>&#x2630;</td><td>Day</td><td>Brightness 80, Contrast 70, Color: Standard</td><td><button class="btn">Edit</button> <button class="btn">Apply</button></td></tr>
+            <tr><td>&#x2630;</td><td>Night</td><td>Brightness 25, Color: Warm</td><td><button class="btn">Edit</button> <button class="btn">Apply</button></td></tr>
+            <tr><td>&#x2630;</td><td>Movie</td><td>Brightness 40, Volume 30, Input: Console</td><td><button class="btn">Edit</button> <button class="btn">Apply</button></td></tr>
+          </table>
+        </div>
+        <div class="row" style="padding-left:0">
+          <button class="btn primary">Capture current state as preset&hellip;</button>
+          <button class="btn">New empty preset</button>
+        </div>
+        <div class="d" style="font-size:12px;color:var(--muted)">Drag the handle to reorder. Cycling hotkeys follow this order.</div>
+      </section>
+
+      <!-- SCHEDULE -->
+      <section class="page" id="schedule">
+        <h1>Schedule</h1>
+        <div class="banner paused">
+          <span>&#x23F8;</span>
+          <div style="flex:1"><b>Schedule is paused.</b> Rules will not run until you resume.</div>
+          <button class="btn">Resume</button>
+        </div>
+        <div class="card">
+          <table>
+            <tr><th>On</th><th>Time</th><th>Days</th><th>Preset</th><th></th></tr>
+            <tr>
+              <td><label class="toggle"><input type="checkbox" checked><span class="track"></span><span class="knob"></span></label></td>
+              <td><input type="time" value="07:30"></td>
+              <td><span class="days"><span class="on">M</span><span class="on">T</span><span class="on">W</span><span class="on">T</span><span class="on">F</span><span>S</span><span>S</span></span></td>
+              <td><select><option>Day</option><option>Night</option><option>Movie</option></select></td>
+              <td><button class="btn danger">Delete</button></td>
+            </tr>
+            <tr>
+              <td><label class="toggle"><input type="checkbox" checked><span class="track"></span><span class="knob"></span></label></td>
+              <td><input type="time" value="21:00"></td>
+              <td><span class="days"><span class="on">M</span><span class="on">T</span><span class="on">W</span><span class="on">T</span><span class="on">F</span><span class="on">S</span><span class="on">S</span></span></td>
+              <td><select><option>Night</option><option>Day</option><option>Movie</option></select></td>
+              <td><button class="btn danger">Delete</button></td>
+            </tr>
+          </table>
+        </div>
+        <div class="row" style="padding-left:0"><button class="btn primary">Add rule</button></div>
+        <h2>Behavior</h2>
+        <div class="card">
+          <div class="row"><div class="label"><div class="t">Apply missed rule after wake, unlock or reconnect</div>
+            <div class="d">Applies only the most recent rule that should already have run today.</div></div>
+            <label class="toggle"><input type="checkbox" checked><span class="track"></span><span class="knob"></span></label></div>
+        </div>
+        <div class="d" style="font-size:12px;color:var(--muted);margin-top:8px">Manual changes are never reverted until the next rule fires. Pause never auto-resumes.</div>
+      </section>
+
+      <!-- HOTKEYS -->
+      <section class="page" id="hotkeys">
+        <h1>Hotkeys</h1>
+        <div class="banner"><span>&#x26A0;</span><div>Could not register <b>Ctrl + Alt + N</b> (already used by another app). Choose a different combination for <b>Apply preset: Night</b>.</div></div>
+        <div class="card">
+          <table>
+            <tr><th>Action</th><th>Shortcut</th><th>Monitor</th><th></th></tr>
+            <tr><td>Brightness up</td><td><span class="keys"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>&#x2191;</kbd></span></td><td>All</td><td><button class="btn">Change</button></td></tr>
+            <tr><td>Brightness down</td><td><span class="keys"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>&#x2193;</kbd></span></td><td>All</td><td><button class="btn">Change</button></td></tr>
+            <tr><td>Volume up</td><td><span class="keys"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>&#x2192;</kbd></span></td><td>All</td><td><button class="btn">Change</button></td></tr>
+            <tr><td>Volume down</td><td><span class="keys"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>&#x2190;</kbd></span></td><td>All</td><td><button class="btn">Change</button></td></tr>
+            <tr><td>Apply preset: Day</td><td><span class="keys"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>D</kbd></span></td><td>All</td><td><button class="btn">Change</button></td></tr>
+            <tr><td>Apply preset: Night</td><td><span class="keys"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>N</kbd></span> <span class="badge" style="background:#fde7e9;color:#a80000">Conflict</span></td><td>All</td><td><button class="btn">Change</button></td></tr>
+            <tr><td>Next preset</td><td><span class="keys"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>P</kbd></span></td><td>All</td><td><button class="btn">Change</button></td></tr>
+            <tr><td>Pause / resume schedule</td><td><span style="color:var(--muted)">Not set</span></td><td>&mdash;</td><td><button class="btn">Set</button></td></tr>
+          </table>
+        </div>
+        <div class="row" style="padding-left:0"><button class="btn primary">Add hotkey</button></div>
+        <h2>Step sizes</h2>
+        <div class="card">
+          <div class="row"><div class="label"><div class="t">Brightness step</div></div><input type="number" value="5"><span class="val">%</span></div>
+          <div class="row"><div class="label"><div class="t">Contrast step</div></div><input type="number" value="5"><span class="val">%</span></div>
+          <div class="row"><div class="label"><div class="t">Volume step</div></div><input type="number" value="5"><span class="val">%</span></div>
+        </div>
+        <h2>On-screen indicator</h2>
+        <div class="card">
+          <div class="row"><div class="label"><div class="t">Show indicator after a hotkey</div><div class="d">A small overlay with the control name and new value for about 1.5 seconds.</div></div>
+            <label class="toggle"><input type="checkbox" checked><span class="track"></span><span class="knob"></span></label></div>
+        </div>
+      </section>
+
+      <!-- SAFETY -->
+      <section class="page" id="safety">
+        <h1>Safety &amp; writes</h1>
+        <h2>Input switching</h2>
+        <div class="card">
+          <div class="row"><div class="label"><div class="t">Confirm before changing input</div>
+            <div class="d">Monitors that act as a USB hub disconnect keyboard and mouse when the input changes.</div></div>
+            <label class="toggle"><input type="checkbox" checked><span class="track"></span><span class="knob"></span></label></div>
+          <div class="row"><div class="label"><div class="t">Automatic revert timeout</div>
+            <div class="d">Restore the previous input unless you choose Keep. 0 disables.</div></div>
+            <input type="range" min="0" max="60" value="10" oninput="this.nextElementSibling.textContent=this.value+' s'"><span class="val">10 s</span></div>
+        </div>
+        <h2>Protecting monitor memory</h2>
+        <div class="card">
+          <div class="row"><div class="label"><div class="t">Write delay</div>
+            <div class="d">Changes are sent once, this long after you stop adjusting.</div></div>
+            <input type="range" min="150" max="2000" step="50" value="400" oninput="this.nextElementSibling.textContent=this.value+' ms'"><span class="val">400 ms</span></div>
+          <div class="row"><div class="label"><div class="t">Live preview while dragging</div>
+            <div class="d">Updates the monitor during the drag (up to 4 times per second). Increases write wear.</div></div>
+            <label class="toggle"><input type="checkbox"><span class="track"></span><span class="knob"></span></label></div>
+          <div class="row"><div class="label"><div class="t">Write audit log</div>
+            <div class="d">Count how many writes are sent to the monitor for each setting.</div></div>
+            <label class="toggle"><input type="checkbox" checked><span class="track"></span><span class="knob"></span></label></div>
+        </div>
+        <h2>Audit (since Oct 1)</h2>
+        <div class="card">
+          <table>
+            <tr><th>Setting</th><th>Writes</th><th style="width:40%"></th></tr>
+            <tr><td>Brightness</td><td>42</td><td><div class="audit-bar" style="width:84%"></div></td></tr>
+            <tr><td>Input source</td><td>9</td><td><div class="audit-bar" style="width:18%"></div></td></tr>
+            <tr><td>Volume</td><td>25</td><td><div class="audit-bar" style="width:50%"></div></td></tr>
+            <tr><td>Contrast</td><td>7</td><td><div class="audit-bar" style="width:14%"></div></td></tr>
+          </table>
+        </div>
+        <div class="row" style="padding-left:0"><button class="btn">Reset counters</button></div>
+      </section>
+
+      <!-- GENERAL -->
+      <section class="page" id="general">
+        <h1>General</h1>
+        <div class="card">
+          <div class="row"><div class="label"><div class="t">Start with Windows</div></div>
+            <label class="toggle"><input type="checkbox" checked><span class="track"></span><span class="knob"></span></label></div>
+          <div class="row"><div class="label"><div class="t">Theme</div></div>
+            <select><option>Use system setting</option><option>Light</option><option>Dark</option></select></div>
+          <div class="row"><div class="label"><div class="t">Enable logging</div><div class="d">Off by default. Logs rotate and stay on this PC.</div></div>
+            <label class="toggle"><input type="checkbox"><span class="track"></span><span class="knob"></span></label></div>
+        </div>
+        <h2>Data</h2>
+        <div class="card">
+          <div class="row"><div class="label"><div class="t">Settings file</div><div class="d">%APPDATA%\dispcontrol\config.toml</div></div>
+            <button class="btn">Open file</button><button class="btn">Open folder</button></div>
+        </div>
+        <h2>About</h2>
+        <div class="card">
+          <div class="row"><div class="label"><div class="t">dispcontrol 0.1.0</div><div class="d">MIT license &middot; github.com/&lt;you&gt;/dispcontrol</div></div></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="footer">
+    <span>Changes are saved automatically.</span><span class="spacer"></span>
+    <span>Minimize or close to send to the tray. Use Quit in the tray menu to exit.</span>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('#nav .item').forEach(function (el) {
+    el.addEventListener('click', function () {
+      document.querySelectorAll('#nav .item').forEach(function (n) { n.classList.remove('active'); });
+      document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active'); });
+      el.classList.add('active');
+      document.getElementById(el.dataset.page).classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>
