@@ -116,9 +116,9 @@ Executable: `dispcontrol`. Global flags: `--json`, `--monitor <id|alias|index>`,
 | `schedule pause` / `resume` / `status` | Control the schedule. |
 | `audit` | Print commit counts (SPEC-WR-10). |
 
-Exit codes: `0` success; `1` general error; `2` invalid usage or value; `3` monitor not found; `4` monitor not responding; `5` partially applied (some preset entries failed); `6` user declined or revert triggered.
+Exit codes: `0` success; `1` general error; `2` invalid usage or value; `3` monitor not found; `4` monitor not responding; `5` partially applied (some preset entries failed); `6` user declined or revert triggered; `7` app not running.
 - SPEC-CLI-1: With `--json`, stdout contains a single JSON object (`ok`, `result`, `error`); no other text on stdout.
-- SPEC-CLI-2: If the tray app is running, the CLI delegates to it so buffering and rate limits are shared (SPEC-WR-6). If not, the CLI performs the action directly under the same rules.
+- SPEC-CLI-2: The CLI is a client of the running app and always delegates to it, so buffering, rate limits and input confirmation are shared (SPEC-WR-6). If the app is not running, the CLI MUST NOT touch any monitor or start the app; it prints an error saying the app is not running and exits with code `7`. With `--json` the error is reported in the JSON object (SPEC-CLI-1).
 - SPEC-CLI-3: Typical CLI latency to a monitor change is under 200 ms with the app running, excluding monitor latency.
 
 ## 11. Integrations
@@ -140,8 +140,9 @@ Exit codes: `0` success; `1` general error; `2` invalid usage or value; `3` moni
 - SPEC-NFR-4: The app MUST recover from monitor, driver and sleep/wake errors without restart.
 
 ## 14. Platform scope
-- v1 Windows 11 (x64): everything above. Reference test hardware: Lenovo L32p-30 over USB-C on Intel Iris Xe Graphics; other monitors work through discovery, other graphics hardware is a future goal.
-- v1 Ubuntu: CLI, scheduling and presets (sections 2-7 and 10, 12); tray, hotkeys and on-screen indicator are best effort. Global hotkeys where the desktop allows, otherwise through desktop shortcuts calling the CLI.
+- Windows 11 (x64): everything above, delivered in releases: v0 = controls, safety, Settings window (implemented pages only, SPEC-UI), tray, CLI; v1 = presets, hotkeys, integrations; v2 = scheduling. Reference test hardware: Lenovo L32p-30 over USB-C on Intel Iris Xe Graphics; other monitors work through discovery, other graphics hardware is a future goal.
+- The Settings window lists only pages for features present in the installed release; Presets and Hotkeys appear in v1, Schedule in v2. Ubuntu Settings window: future.
+- Ubuntu (v3): monitor control uses `ddcutil`. CLI, scheduling and presets (sections 2-7 and 10, 12); tray, hotkeys and on-screen indicator are best effort. Global hotkeys where the desktop allows, otherwise through desktop shortcuts calling the CLI.
 
 ## 15. Acceptance criteria (summary)
 1. On the reference hardware (L32p-30, USB-C, Intel Iris Xe), every control the monitor reports can be read and set, and numeric values round-trip per SPEC-CTL-3. On a monitor that reports fewer controls, only those are offered and nothing fails.
@@ -154,5 +155,5 @@ Exit codes: `0` success; `1` general error; `2` invalid usage or value; `3` moni
 8. Idle CPU 0% and memory under 30 MB measured after 10 minutes idle.
 
 ## 16. Open items
-- Handling of multiple identical monitors with no serial number (aliasing and syncing) is out of scope for v1; see PRD future features. Until then, such monitors are told apart by connection position, flagged as an unstable ID (SPEC-MON-1).
+- Handling of multiple identical monitors with no serial number (aliasing and syncing) is out of scope for now; see PRD future features. Until then, such monitors are told apart by connection position, flagged as an unstable ID (SPEC-MON-1).
 - Hardware-validation spike results (e.g. latency numbers) will be recorded as verified-monitor notes, not as spec values.

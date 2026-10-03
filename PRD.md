@@ -8,8 +8,8 @@ Lenovo Display Control Center is unreliable, and ClickMonitorDDC is no longer ma
 
 ## 2. Target user and hardware
 - A single power user with an external monitor, working on Windows 11 (primary) and Ubuntu (secondary).
-- v1 supported hardware: **Lenovo L32p-30**, connected directly over **USB-C**, also used as the USB hub, on a PC with **Intel Iris Xe Graphics**.
-- Other monitors and graphics hardware may work but are not supported in v1 (see Future features).
+- Supported hardware (v0 and later until extended): **Lenovo L32p-30**, connected directly over **USB-C**, also used as the USB hub, on a PC with **Intel Iris Xe Graphics**.
+- Other monitors and graphics hardware may work but are not supported yet (see Future features).
 
 ## 3. Goals
 1. Very light and snappy: minimal CPU and memory use, instant startup, no noticeable delay when acting.
@@ -20,7 +20,7 @@ Lenovo Display Control Center is unreliable, and ClickMonitorDDC is no longer ma
 6. Protect the monitor's memory from wear: apply changes only once the user has finished adjusting.
 7. Automatic preset switching at fixed times of day.
 
-## 4. Non-goals (v1)
+## 4. Non-goals (for now)
 - Laptop internal-panel brightness; software dimming overlays.
 - Monitor firmware updates or vendor-specific features.
 - Sunrise/sunset-based scheduling.
@@ -71,12 +71,12 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 - An optional audit log shows how many writes were made per setting.
 
 ### 5.8 Input switching safety
-- Changing the input can disconnect devices: a monitor that doubles as a USB hub (as in the v1 hardware) drops the USB devices on it (e.g. keyboard and mouse) when the input changes, and an input with no signal can leave the user without a picture.
+- Changing the input can disconnect devices: a monitor that doubles as a USB hub (as in the reference hardware) drops the USB devices on it (e.g. keyboard and mouse) when the input changes, and an input with no signal can leave the user without a picture.
 - **Any input change away from the currently active input requires confirmation by default**, with a clear warning. The confirmation can be turned off in settings.
 - Input changes offer an automatic revert if the user does not confirm within a timeout (default 10 seconds, configurable).
 
 ### 5.9 Integrations
-- **Command line**: list monitors, read/set a control, list/apply presets, pause/resume the schedule; machine-readable output and meaningful exit codes.
+- **Command line** (works only while the app is running; otherwise it reports an error and changes nothing): list monitors, read/set a control, list/apply presets, pause/resume the schedule; machine-readable output and meaningful exit codes.
 - **PowerToys Run**: search presets and run commands such as setting brightness.
 - **PowerToys Command Palette**: the same commands.
 - Integrations respond immediately when the app is running.
@@ -94,7 +94,7 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 - Hotkey press to visible monitor change under 200 ms (excluding the write delay and the monitor's own latency).
 - No UI freeze when the monitor ignores commands.
 - At most one write per setting per user adjustment with live preview off.
-- All v1 controls work on the L32p-30 over USB-C with Intel Iris Xe Graphics.
+- All controls in the first release work on the L32p-30 over USB-C with Intel Iris Xe Graphics.
 - A scheduled preset applies within 1 second of its time, including after waking from sleep.
 
 ## 8. Risks
@@ -105,19 +105,17 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 - PowerToys extension interfaces may change between releases.
 
 ## 9. Release plan
-- **Phase 0**: Prove the L32p-30 can be read and controlled over USB-C on Intel Iris Xe (brightness, input, volume).
-- **Phase 1**: Command-line control of all v1 settings with memory-protecting writes.
-- **Phase 2**: Tray panel, presets, hotkeys, settings.
-- **Phase 3**: Scheduling.
-- **Phase 4**: PowerToys Run and Command Palette integrations.
-- **Phase 5**: Ubuntu support (command line and scheduling first, tray later).
-- **Phase 6**: On-screen indicator, installer, package-manager release, documentation.
-
-## 10. Future features (post v1)
+- **Phase 0 (spike)**: Prove the L32p-30 can be read and controlled over USB-C on Intel Iris Xe (brightness, input, volume).
+- **v0 (first release, Windows 11)**: Background app with tray icon; Settings window showing only what is implemented (monitor controls, safety and write settings, general settings); confirmation for input changes; memory-protecting writes; command line (works while the app runs).
+- **v1**: Presets and hotkeys (tray panel, Presets and Hotkeys pages in Settings), PowerToys Run and Command Palette integrations.
+- **v2**: Scheduling (Schedule page in Settings).
+- **v3**: Ubuntu support using `ddcutil` (command line, presets, scheduling first); on-screen indicator, installer, package-manager release, documentation as they become ready.
+- The Settings window only shows pages for features that exist in the installed release.
+## 10. Future features
 - Support for all graphics hardware (other Intel, AMD, NVIDIA) and drivers.
 - Support for other monitors and brands; per-model profiles contributed by the community.
 - Sunrise/sunset-based scheduling; scheduling by ambient light or app/context (e.g. game or video detected).
-- Full Ubuntu tray UI; other Linux desktops (KDE) and distributions; macOS.
+- Settings window and full tray UI on Ubuntu; other Linux desktops (KDE) and distributions; macOS.
 - Per-application or per-window automatic presets.
 - Software dimming fallback for monitors without DDC/CI support.
 - Laptop internal-panel brightness control.
@@ -127,10 +125,10 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 - Mobile/remote control and smart-home integration.
 
 ## 11. Decisions
-1. v1 controls: brightness, contrast, input, volume, power, color preset, RGB gain.
+1. Controls: brightness, contrast, input, volume, power, color preset, RGB gain.
 2. License: MIT.
 3. Connection: directly over USB-C; the monitor is also the USB hub.
-4. v1 graphics hardware: Intel Iris Xe Graphics; all others are a future goal.
+4. Initial graphics hardware: Intel Iris Xe Graphics; all others are a future goal.
 5. Linux target: Ubuntu.
 6. Scheduling: fixed clock times only.
 7. Live preview: off by default, opt-in.
@@ -139,3 +137,5 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 
 ## 12. Open questions
 - None currently.
+8. Release order: v0 = control and Settings window; v1 = presets, hotkeys, integrations; v2 = scheduling; v3 = Ubuntu.
+9. Ubuntu Settings window is a future feature.
