@@ -11,22 +11,23 @@ The repository contains a Windows-first Rust workspace following the crate bound
 - Daemon-only CLI operation over Windows named-pipe IPC.
 - TOML settings persistence with Windows file replacement.
 - Default mock-style Settings window (Windows 11 sidebar, cards, light/dark following the system theme) with Monitors, Safety & writes, and General pages: monitor selection, supported-control chips, sliders/combos, quiet-period write setting, input-change confirmation, and input-revert timer. The compact layout remains available with `dispcontrold --native-ui`.
+- Click a slider's percentage to type an exact value (Enter applies, Esc cancels); typed values use the same buffered write as dragging.
+- Input source raw `0x31` is labelled "USB-C" on the reference monitor.
+- After a successful enum write (for example, Color preset) the UI keeps the written value and does not read it back immediately, because the monitor is busy and the read fails (DDC/CI error) or returns the old value. "Re-read from monitor" shows the actual state.
 - Notification-area tray icon; minimizing or closing Settings hides the window, and the tray menu can reopen Settings or quit.
 - Confirmation before changing the active monitor input, plus a timed keep/revert prompt.
 
-Both Settings presentations use the same view model and application API. The default UI follows [mockups/settings.html](./mockups/settings.html) for the implemented v0 features only (no theme selector; theme follows Windows; Presets/Hotkeys/Schedule pages omitted). A screenshot of the default window on the reference monitor was reviewed; tray behavior and input switching/rollback still need the manual acceptance checks below.
+Both Settings presentations use the same view model and application API. The default UI follows [mockups/settings.html](./mockups/settings.html) for the implemented v0 features only (no theme selector; theme follows Windows; Presets/Hotkeys/Schedule pages omitted). A screenshot of the default window on the reference monitor was reviewed; tray behavior, settings persistence and input switching/rollback were manually accepted by the owner on the reference setup.
 
-## Known gaps before v0 is complete
+## Known gaps
 
-- Add interactive Windows acceptance checks for tray hide/restore/quit, Settings persistence, monitor reads, and input confirmation/revert. Do not automate potentially disruptive physical input changes in ordinary CI.
-- Input and volume writes have not been verified on the reference monitor; Phase 0 evidence is recorded in [spikes/windows-ddc/results.md](./spikes/windows-ddc/results.md).
-- The `--native-ui` argument selects the compact layout; invalid daemon arguments are rejected with a usage error.
-- The mock-matching UI has had one visual pass at 150% scale (system-DPI aware); light theme, other scales and keyboard/accessibility review remain.
+- Input and volume behaviour was verified manually by the owner on the reference monitor (v0 acceptance); automated CI intentionally does not switch physical inputs.
+- Slider writes still read back after the buffered write; apply the same no-read-back approach if a DDC/CI read error appears right after a write.
+- Light theme, other display scales and a formal keyboard/accessibility review were not exhaustively covered by the v0 acceptance.
 
 ## Next implementation steps
 
-1. Run the interactive Windows v0 acceptance flow on the reference setup, including the input revert path when safe to do so.
-2. Review light theme, other display scales and keyboard navigation of the default UI and the `--native-ui` fallback; correct clipping and accessibility issues.
+1. Start v1 (presets, hotkeys, integrations); see the release plan below.
 
 ## Release plan and version scope
 
@@ -38,7 +39,7 @@ This section is the roadmap for what each release contains. The implementation c
 - Confirmed brightness read/write and restore. Input and volume behavior still need supervised verification on the physical monitor.
 - Evidence and limitations: [spikes/windows-ddc/results.md](./spikes/windows-ddc/results.md).
 
-### v0 — first Windows 11 release (in progress)
+### v0 — first Windows 11 release (complete)
 
 - Discover monitors and expose only controls each display reports as supported.
 - Read and set monitor controls through the running daemon; provide a CLI with machine-readable output and meaningful exit codes.
@@ -85,4 +86,4 @@ Latest recorded verification for the Windows GNU target:
 - 28 workspace tests pass, including deterministic quiet-period/coalescing/rate-limit/input-revert tests, IPC dispatch success/error and settings persistence, CLI JSON usage cases, and settings-file replacement/backup behavior.
 - Runtime smoke checks: CLI reports exit code 7 with a JSON error when the daemon is absent; with the daemon running, monitor listing, brightness read, settings JSON, 20 sequential requests, and 20 concurrent CLI/IPC requests succeeded. The default window opened at 880x720; `--native-ui` opened at 760x640; both served CLI requests. Closing the Settings window hid it without stopping the daemon, and the tray-icon left-click message restored it. An invalid daemon argument exits with code 1.
 
-No physical monitor input switch was performed during these checks. Manual acceptance of tray-menu quit, edited-settings persistence through the window, physical input confirmation/revert, and visual UI/accessibility review remain outstanding; this verification does not certify v0 release readiness.
+No physical monitor input switch was performed during these checks. Manual acceptance of tray behavior (including Quit), settings persistence, input confirmation/revert and the colour-preset fix was completed by the owner on the reference setup; v0 is accepted.

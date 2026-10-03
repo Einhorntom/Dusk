@@ -11,8 +11,9 @@ use windows::Win32::Graphics::Gdi::{
     CreateFontW, CreatePen, CreateSolidBrush, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX,
     DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawFocusRect, DrawTextW, FillRect, GetDC,
     GetStockObject, GetTextExtentPoint32W, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, LineTo,
-    MapWindowPoints, MoveToEx, NULL_BRUSH, PS_SOLID, ReleaseDC, RoundRect, SelectObject,
-    SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
+    MapWindowPoints, MoveToEx, NULL_BRUSH, PS_SOLID, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE,
+    RedrawWindow, ReleaseDC, RoundRect, SelectObject, SetBkColor, SetBkMode, SetTextColor,
+    TRANSPARENT,
 };
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::Win32::UI::Controls::{
@@ -23,10 +24,11 @@ use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::WindowsAndMessaging::{
     BS_OWNERDRAW, CB_ADDSTRING, CB_GETCURSEL, CB_SETCURSEL, CBN_SELCHANGE, CBS_DROPDOWNLIST,
     CreateWindowExW, DestroyWindow, GetClientRect, GetDlgCtrlID, GetScrollInfo, GetWindowRect,
-    HMENU, IDC_ARROW, KillTimer, LoadCursorW, MoveWindow, RegisterClassW, SB_VERT, SCROLLINFO,
-    SIF_ALL, SIF_PAGE, SIF_POS, SIF_RANGE, SW_ERASE, SW_INVALIDATE, SW_SCROLLCHILDREN,
-    ScrollWindowEx, SendMessageW as send_message_raw, SetTimer, WINDOW_STYLE, WM_SETFONT,
-    WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN, WS_EX_CONTROLPARENT, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+    GetWindowTextW, HMENU, IDC_ARROW, KillTimer, LoadCursorW, MoveWindow, RegisterClassW, SB_VERT,
+    SCROLLINFO, SIF_ALL, SIF_PAGE, SIF_POS, SIF_RANGE, SW_ERASE, SW_HIDE, SW_INVALIDATE,
+    SW_SCROLLCHILDREN, SW_SHOW, ScrollWindowEx, SendMessageW as send_message_raw, SetTimer,
+    ShowWindow, WINDOW_STYLE, WM_SETFONT, WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN,
+    WS_EX_CONTROLPARENT, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -42,6 +44,16 @@ const VALUE_BASE_ID: u16 = 1100;
 const COMBO_BASE_ID: u16 = 1200;
 const REVERT_SLIDER_ID: u16 = 1501;
 const CONFIRM_TOGGLE_ID: u16 = 2000;
+const SS_NOTIFY: u32 = 0x100;
+const EDIT_ID: u16 = 1900;
+const WM_CTLCOLOREDIT: u32 = 0x0133;
+const EN_KILLFOCUS: u32 = 0x0200;
+const WM_GETDLGCODE: u32 = 0x0087;
+const WM_KEYDOWN: u32 = 0x0100;
+const WM_CHAR: u32 = 0x0102;
+const EM_SETSEL: u32 = 0x00B1;
+const TBM_GETRANGEMIN: u32 = 0x0401;
+const TBM_GETRANGEMAX: u32 = 0x0402;
 const SS_NOPREFIX: u32 = 0x80;
 const SS_RIGHT: u32 = 0x02;
 const TBS_NOTICKS: u32 = 0x10;
@@ -164,6 +176,12 @@ struct Card {
     separators: Vec<i32>,
 }
 
+struct ValueEdit {
+    edit: HWND,
+    label: HWND,
+    slider: HWND,
+}
+
 struct RowControl {
     key: ControlKey,
     slider: HWND,
@@ -182,6 +200,8 @@ pub(crate) struct State {
     hint: HWND,
     children: Vec<HWND>,
     muted: Vec<HWND>,
+    editing: Option<ValueEdit>,
+    on_card: Vec<HWND>,
     cards: Vec<Card>,
     chips: Vec<(RECT, String)>,
     rows: Vec<RowControl>,
@@ -205,6 +225,8 @@ impl State {
             hint: HWND::default(),
             children: Vec::new(),
             muted: Vec::new(),
+            editing: None,
+            on_card: Vec::new(),
             cards: Vec::new(),
             chips: Vec::new(),
             rows: Vec::new(),
@@ -570,6 +592,7 @@ fn enum_label(key: ControlKey, value: u32) -> String {
         (ControlKey::Input, 0x11) => Some("HDMI 1"),
         (ControlKey::Input, 0x12) => Some("HDMI 2"),
         (ControlKey::Input, 0x1B) => Some("USB-C"),
+        (ControlKey::Input, 0x31) => Some("USB-C"),
         (ControlKey::ColorPreset, 0x01) => Some("sRGB"),
         (ControlKey::ColorPreset, 0x02) => Some("Native"),
         (ControlKey::ColorPreset, 0x03) => Some("4000 K"),
@@ -670,6 +693,9 @@ impl Builder<'_> {
             )
         }
         .unwrap_or_default();
+        if self.card_top.is_some() {
+            self.context.modern.on_card.push(window);
+        }
         send(
             window,
             WM_SETFONT,
@@ -810,7 +836,7 @@ impl Builder<'_> {
             w!("STATIC"),
             value_text,
             value_id,
-            SS_NOPREFIX | SS_RIGHT,
+            SS_NOPREFIX | SS_RIGHT | SS_NOTIFY,
             (
                 self.control_x(value_width),
                 top + (height - self.px(20)) / 2,
@@ -899,7 +925,12 @@ fn rebuild(context: &mut WindowContext) {
         }
     }
     unsafe {
-        let _ = InvalidateRect(Some(context.modern.content), None, true);
+        let _ = RedrawWindow(
+            Some(context.modern.content),
+            None,
+            None,
+            RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN,
+        );
         for nav in &context.modern.nav {
             let _ = InvalidateRect(Some(*nav), None, true);
         }
@@ -929,6 +960,8 @@ fn build_page(context: &mut WindowContext, client_w: i32) {
         }
     }
     context.modern.muted.clear();
+    context.modern.editing = None;
+    context.modern.on_card.clear();
     context.modern.cards.clear();
     context.modern.chips.clear();
     context.modern.rows.clear();
@@ -1295,11 +1328,10 @@ unsafe extern "system" fn content_proc(
             paint_content(unsafe { &*pointer }, window, HDC(wparam.0 as *mut c_void));
             LRESULT(1)
         }
-        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT => {
             let context = unsafe { &*pointer };
             ctl_color(
                 context,
-                window,
                 HDC(wparam.0 as *mut c_void),
                 HWND(lparam.0 as *mut c_void),
             )
@@ -1326,36 +1358,10 @@ unsafe extern "system" fn content_proc(
     }
 }
 
-fn ctl_color(context: &WindowContext, content: HWND, hdc: HDC, child: HWND) -> Option<LRESULT> {
+fn ctl_color(context: &WindowContext, hdc: HDC, child: HWND) -> Option<LRESULT> {
     let brushes = context.modern.brushes?;
     let theme = context.modern.theme;
-    let mut rect = RECT::default();
-    unsafe {
-        let _ = GetWindowRect(child, &mut rect);
-        let mut points = [
-            POINT {
-                x: rect.left,
-                y: rect.top,
-            },
-            POINT {
-                x: rect.right,
-                y: rect.bottom,
-            },
-        ];
-        MapWindowPoints(None, Some(content), &mut points);
-        rect = RECT {
-            left: points[0].x,
-            top: points[0].y + context.modern.scroll_y,
-            right: points[1].x,
-            bottom: points[1].y + context.modern.scroll_y,
-        };
-    }
-    let centre_y = (rect.top + rect.bottom) / 2;
-    let on_card = context
-        .modern
-        .cards
-        .iter()
-        .any(|card| centre_y >= card.rect.top && centre_y < card.rect.bottom);
+    let on_card = context.modern.on_card.contains(&child);
     let (background, brush) = if on_card {
         (theme.card, brushes.card)
     } else {
@@ -1651,6 +1657,10 @@ pub(crate) fn handle_command(context: &mut WindowContext, wparam: WPARAM) {
             context.modern.scroll_y = 0;
             rebuild(context);
         }
+    } else if (VALUE_BASE_ID..VALUE_BASE_ID + 100).contains(&id) && notification == 0 {
+        begin_value_edit(context, id);
+    } else if id == EDIT_ID && notification == EN_KILLFOCUS {
+        finish_value_edit(context);
     } else if id == REFRESH_ID {
         refresh(context);
     } else if id == MONITOR_ID && notification == CBN_SELCHANGE {
@@ -1669,6 +1679,144 @@ pub(crate) fn handle_command(context: &mut WindowContext, wparam: WPARAM) {
                 let _ = InvalidateRect(Some(*window), None, true);
             }
         }
+    }
+}
+
+fn begin_value_edit(context: &mut WindowContext, id: u16) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+    use windows::Win32::UI::Shell::SetWindowSubclass;
+    use windows::Win32::UI::WindowsAndMessaging::{ES_AUTOHSCROLL, ES_NUMBER, ES_RIGHT, WS_BORDER};
+    finish_value_edit(context);
+    let Some(row) = context
+        .modern
+        .rows
+        .iter()
+        .find(|row| unsafe { GetDlgCtrlID(row.value) } == i32::from(id))
+    else {
+        return;
+    };
+    let (label, slider) = (row.value, row.slider);
+    let content = context.modern.content;
+    let mut rect = RECT::default();
+    let mut points = [POINT::default(); 2];
+    unsafe {
+        let _ = GetWindowRect(label, &mut rect);
+        points[0] = POINT {
+            x: rect.left,
+            y: rect.top,
+        };
+        points[1] = POINT {
+            x: rect.right,
+            y: rect.bottom,
+        };
+        MapWindowPoints(None, Some(content), &mut points);
+    }
+    let pad = context.modern.px(4);
+    let position = send(slider, TBM_GETPOS, WPARAM(0), LPARAM(0)).0;
+    let text = wide_null(&position.to_string());
+    let edit = unsafe {
+        CreateWindowExW(
+            Default::default(),
+            w!("EDIT"),
+            PCWSTR(text.as_ptr()),
+            WS_CHILD
+                | WS_VISIBLE
+                | WS_TABSTOP
+                | WS_BORDER
+                | WINDOW_STYLE((ES_NUMBER | ES_RIGHT | ES_AUTOHSCROLL) as u32),
+            points[0].x,
+            points[0].y - pad,
+            points[1].x - points[0].x,
+            points[1].y - points[0].y + 2 * pad,
+            Some(content),
+            Some(HMENU(EDIT_ID as usize as *mut c_void)),
+            None,
+            None,
+        )
+    }
+    .unwrap_or_default();
+    if edit.0.is_null() {
+        return;
+    }
+    if let Some(fonts) = context.modern.fonts {
+        send(edit, WM_SETFONT, WPARAM(fonts.body.0 as usize), LPARAM(1));
+    }
+    context.modern.children.push(edit);
+    context.modern.on_card.push(edit);
+    context.modern.editing = Some(ValueEdit {
+        edit,
+        label,
+        slider,
+    });
+    unsafe {
+        let _ = SetWindowSubclass(edit, Some(edit_subclass), 1, 0);
+        let _ = ShowWindow(label, SW_HIDE);
+        let _ = SetFocus(Some(edit));
+    }
+    send(edit, EM_SETSEL, WPARAM(0), LPARAM(-1));
+}
+
+fn finish_value_edit(context: &mut WindowContext) {
+    let Some(editing) = context.modern.editing.take() else {
+        return;
+    };
+    let mut buffer = [0u16; 16];
+    let length = unsafe { GetWindowTextW(editing.edit, &mut buffer) }.max(0) as usize;
+    let text = String::from_utf16_lossy(&buffer[..length]);
+    context
+        .modern
+        .children
+        .retain(|window| *window != editing.edit);
+    unsafe {
+        let _ = DestroyWindow(editing.edit);
+        let _ = ShowWindow(editing.label, SW_SHOW);
+    }
+    if let Ok(value) = text.trim().parse::<u32>() {
+        let min = send(editing.slider, TBM_GETRANGEMIN, WPARAM(0), LPARAM(0)).0 as u32;
+        let max = send(editing.slider, TBM_GETRANGEMAX, WPARAM(0), LPARAM(0)).0 as u32;
+        let value = value.clamp(min, max);
+        send(
+            editing.slider,
+            TBM_SETPOS,
+            WPARAM(1),
+            LPARAM(value as isize),
+        );
+        on_hscroll(context, editing.slider);
+    }
+}
+
+// Enter commits and Escape cancels by moving focus away from the edit box.
+unsafe extern "system" fn edit_subclass(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    _data: usize,
+) -> LRESULT {
+    use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+    use windows::Win32::UI::Shell::DefSubclassProc;
+    use windows::Win32::UI::WindowsAndMessaging::GetParent;
+    const VK_RETURN: usize = 0x0D;
+    const VK_ESCAPE: usize = 0x1B;
+    match message {
+        WM_GETDLGCODE => {
+            let result = unsafe { DefSubclassProc(window, message, wparam, lparam) };
+            LRESULT(result.0 | 0x4)
+        }
+        WM_KEYDOWN if wparam.0 == VK_RETURN || wparam.0 == VK_ESCAPE => {
+            if wparam.0 == VK_ESCAPE {
+                set_window_text(window, "");
+            }
+            if let Ok(parent) = unsafe { GetParent(window) } {
+                unsafe {
+                    let _ = SetFocus(Some(parent));
+                }
+            }
+            LRESULT(0)
+        }
+        WM_CHAR if wparam.0 == VK_RETURN || wparam.0 == VK_ESCAPE => LRESULT(0),
+        _ => unsafe { DefSubclassProc(window, message, wparam, lparam) },
     }
 }
 
@@ -1727,10 +1875,24 @@ fn apply_enum(context: &mut WindowContext, id: u16) {
         return;
     };
     context.model.select_control(key);
-    match context.model.set_selected_value(ControlValue::Enum(value)) {
-        Ok(true) => set_status(context, "Monitor setting applied."),
-        Ok(false) => set_status(context, "Value is unchanged; no monitor write was sent."),
-        Err(error) => set_status(context, &error.to_string()),
+    let applied = match context.model.set_selected_value(ControlValue::Enum(value)) {
+        Ok(true) => {
+            set_status(context, "Monitor setting applied.");
+            true
+        }
+        Ok(false) => {
+            set_status(context, "Value is unchanged; no monitor write was sent.");
+            true
+        }
+        Err(error) => {
+            set_status(context, &error.to_string());
+            false
+        }
+    };
+    // Monitors often report the old value for a moment after a write, so a
+    // successful write keeps the user's choice instead of snapping back.
+    if applied {
+        return;
     }
     let actual = context
         .model

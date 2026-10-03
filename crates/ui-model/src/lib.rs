@@ -79,7 +79,15 @@ impl MonitorSettingsModel {
             .selected_control
             .ok_or(UseCaseError::SettingsInvalid("no control is selected"))?;
         let changed = self.api.set(monitor, control, value)?;
-        self.refresh_selected_control()?;
+        // Monitors are often busy or report the old value right after a
+        // write, so trust the accepted write instead of reading it back.
+        if let Some(existing) = self
+            .available_controls
+            .iter_mut()
+            .find(|existing| existing.capability.key == control)
+        {
+            existing.value = value;
+        }
         Ok(changed)
     }
 
