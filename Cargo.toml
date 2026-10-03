@@ -2,6 +2,7 @@
 members = [
     "crates/domain",
     "crates/app",
+    "crates/ddc-fake",
     "crates/mccs",
     "crates/ddc-windows",
     "crates/ipc",

@@ -13,18 +13,30 @@ pub struct CliError {
     pub json_output: bool,
 }
 
+/// Sends one encoded request to the daemon and returns the encoded response.
+pub type Transport<'a> = &'a dyn Fn(&[u8]) -> Result<Vec<u8>, IpcError>;
+
 pub fn run(args: &[String]) -> Result<String, CliError> {
+    run_with(args, &transact)
+}
+
+/// Runs the CLI against `transport` instead of the daemon's named pipe.
+pub fn run_with(args: &[String], transport: Transport<'_>) -> Result<String, CliError> {
     let json_output = args.iter().any(|argument| argument == "--json");
     let command_args = args
         .iter()
         .filter(|argument| argument.as_str() != "--json")
         .cloned()
         .collect::<Vec<_>>();
-    run_command(&command_args, json_output)
+    run_command(&command_args, json_output, transport)
 }
 
-fn run_command(args: &[String], json_output: bool) -> Result<String, CliError> {
-    if let Some(output) = file_command(args, json_output)? {
+fn run_command(
+    args: &[String],
+    json_output: bool,
+    transport: Transport<'_>,
+) -> Result<String, CliError> {
+    if let Some(output) = file_command(args, json_output, transport)? {
         return Ok(if json_output {
             json!({ "ok": true, "result": output, "error": null }).to_string()
         } else {
@@ -66,7 +78,7 @@ fn run_command(args: &[String], json_output: bool) -> Result<String, CliError> {
         _ => preset_request(args, json_output)?,
     };
 
-    let parsed = exchange(&request, json_output)?;
+    let parsed = exchange(&request, json_output, transport)?;
     let partial = matches!(parsed["result"]["failed"].as_u64(), Some(failed) if failed > 0);
     if json_output {
         let output = json!({
@@ -101,10 +113,14 @@ fn run_command(args: &[String], json_output: bool) -> Result<String, CliError> {
     Ok(text)
 }
 
-fn exchange(request: &Value, json_output: bool) -> Result<Value, CliError> {
+fn exchange(
+    request: &Value,
+    json_output: bool,
+    transport: Transport<'_>,
+) -> Result<Value, CliError> {
     let bytes = serde_json::to_vec(request)
         .map_err(|error| cli_error(&error.to_string(), 1, json_output))?;
-    let response = transact(&bytes).map_err(|error| {
+    let response = transport(&bytes).map_err(|error| {
         let exit_code = match error {
             IpcError::DaemonUnavailable => 7,
             _ => 1,
@@ -129,7 +145,11 @@ fn exchange(request: &Value, json_output: bool) -> Result<Value, CliError> {
 }
 
 /// `preset export [file]` and `preset import <file> [--replace]` touch the local file system.
-fn file_command(args: &[String], json_output: bool) -> Result<Option<String>, CliError> {
+fn file_command(
+    args: &[String],
+    json_output: bool,
+    transport: Transport<'_>,
+) -> Result<Option<String>, CliError> {
     let replace = args.iter().any(|argument| argument == "--replace");
     let positional: Vec<&str> = args
         .iter()
@@ -138,7 +158,7 @@ fn file_command(args: &[String], json_output: bool) -> Result<Option<String>, Cl
         .collect();
     match positional.as_slice() {
         ["preset", "export", rest @ ..] if rest.len() <= 1 => {
-            let parsed = exchange(&json!({ "op": "preset_export" }), json_output)?;
+            let parsed = exchange(&json!({ "op": "preset_export" }), json_output, transport)?;
             let text = parsed["result"]["text"].as_str().unwrap_or_default();
             match rest.first() {
                 None => Ok(Some(text.to_owned())),
@@ -157,6 +177,7 @@ fn file_command(args: &[String], json_output: bool) -> Result<Option<String>, Cl
             let parsed = exchange(
                 &json!({ "op": "preset_import", "text": text, "replace": replace }),
                 json_output,
+                transport,
             )?;
             let result = &parsed["result"];
             Ok(Some(format!(

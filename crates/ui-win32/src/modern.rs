@@ -32,39 +32,23 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR, w};
 
+mod ids;
+
+use dispcontrol_ui_model::text::{
+    apply_report_message, control_description, control_title, enum_label, exchange_path,
+    import_summary_message, parse_entry_value, preset_entry_description, snap_debounce_ms,
+    snap_revert_seconds,
+};
+use ids::{Control, EntryButton, ROW_LIMIT, RowButton};
+
 use super::{
     DEBOUNCE_ID, MONITOR_ID, REFRESH_ID, SETTINGS_TIMER, SLIDER_TIMER, STATUS_ID, WindowContext,
     set_status, wide_null,
 };
 
 const CONTENT_CLASS: PCWSTR = w!("DispcontrolSettingsContent");
-const NAV_BASE_ID: u16 = 300;
-const SLIDER_BASE_ID: u16 = 1000;
-const VALUE_BASE_ID: u16 = 1100;
-const COMBO_BASE_ID: u16 = 1200;
-const REVERT_SLIDER_ID: u16 = 1501;
-const CONFIRM_TOGGLE_ID: u16 = 2000;
-const PRESET_NAME_ID: u16 = 2050;
-const PRESET_SAVE_ID: u16 = 2051;
-const PRESET_SAVE_INPUT_ID: u16 = 2052;
-const PRESET_APPLY_BASE_ID: u16 = 2100;
-const PRESET_RENAME_BASE_ID: u16 = 2200;
-const PRESET_UP_BASE_ID: u16 = 2300;
-const PRESET_DOWN_BASE_ID: u16 = 2400;
-const PRESET_DELETE_BASE_ID: u16 = 2500;
-const PRESET_ENTRY_VALUE_BASE_ID: u16 = 2600;
-const PRESET_ENTRY_SET_BASE_ID: u16 = 2700;
-const PRESET_ENTRY_REMOVE_BASE_ID: u16 = 2800;
-const PRESET_EDIT_BASE_ID: u16 = 2900;
-const PRESET_BACK_ID: u16 = 3001;
-const PRESET_EXPORT_ID: u16 = 3002;
-const PRESET_IMPORT_ID: u16 = 3003;
-const PRESET_FOLDER_ID: u16 = 3004;
-const PRESET_EXCHANGE_FILE: &str = "dispcontrol-presets.toml";
-const PRESET_MAX: usize = 99;
 const EM_SETLIMITTEXT: u32 = 0x00C5;
 const SS_NOTIFY: u32 = 0x100;
-const EDIT_ID: u16 = 1900;
 const WM_CTLCOLOREDIT: u32 = 0x0133;
 const EN_KILLFOCUS: u32 = 0x0200;
 const WM_GETDLGCODE: u32 = 0x0087;
@@ -405,7 +389,7 @@ pub(crate) fn create_controls(context: &mut WindowContext) -> Result<(), String>
                 10,
                 10,
                 Some(context.window),
-                Some(HMENU((NAV_BASE_ID as usize + index) as *mut c_void)),
+                Some(HMENU(Control::Nav(index).id() as usize as *mut c_void)),
                 None,
                 None,
             )
@@ -585,62 +569,6 @@ fn current_settings(context: &WindowContext) -> AppSettings {
         .pending_settings
         .clone()
         .unwrap_or_else(|| context.model.settings().clone())
-}
-
-fn control_title(key: ControlKey) -> &'static str {
-    match key {
-        ControlKey::Brightness => "Brightness",
-        ControlKey::Contrast => "Contrast",
-        ControlKey::Volume => "Volume",
-        ControlKey::Input => "Input source",
-        ControlKey::ColorPreset => "Color preset",
-        ControlKey::GainRed => "Red gain",
-        ControlKey::GainGreen => "Green gain",
-        ControlKey::GainBlue => "Blue gain",
-        ControlKey::Power => "Power",
-    }
-}
-
-fn control_description(key: ControlKey) -> Option<&'static str> {
-    match key {
-        ControlKey::Input => Some("Changing input asks for confirmation (see Safety & writes)."),
-        ControlKey::Power => {
-            Some("Sends a power mode to the display. Wake it with its own button.")
-        }
-        _ => None,
-    }
-}
-
-fn enum_label(key: ControlKey, value: u32) -> String {
-    let named = match (key, value) {
-        (ControlKey::Input, 0x0F) => Some("DisplayPort 1"),
-        (ControlKey::Input, 0x10) => Some("DisplayPort 2"),
-        (ControlKey::Input, 0x11) => Some("HDMI 1"),
-        (ControlKey::Input, 0x12) => Some("HDMI 2"),
-        (ControlKey::Input, 0x1B) => Some("USB-C"),
-        (ControlKey::Input, 0x31) => Some("USB-C"),
-        (ControlKey::ColorPreset, 0x01) => Some("sRGB"),
-        (ControlKey::ColorPreset, 0x02) => Some("Native"),
-        (ControlKey::ColorPreset, 0x03) => Some("4000 K"),
-        (ControlKey::ColorPreset, 0x04) => Some("5000 K"),
-        (ControlKey::ColorPreset, 0x05) => Some("6500 K"),
-        (ControlKey::ColorPreset, 0x06) => Some("7500 K"),
-        (ControlKey::ColorPreset, 0x07) => Some("8200 K"),
-        (ControlKey::ColorPreset, 0x08) => Some("9300 K"),
-        (ControlKey::ColorPreset, 0x09) => Some("10000 K"),
-        (ControlKey::ColorPreset, 0x0B) => Some("User 1"),
-        (ControlKey::Power, 0x01) => Some("On"),
-        (ControlKey::Power, 0x02) => Some("Standby"),
-        (ControlKey::Power, 0x03) => Some("Suspend"),
-        (ControlKey::Power, 0x04) => Some("Off (soft)"),
-        (ControlKey::Power, 0x05) => Some("Off (hard)"),
-        _ => None,
-    };
-    match (named, key) {
-        (Some(name), ControlKey::Input) => format!("{name} (raw-0x{value:02X})"),
-        (Some(name), _) => name.to_owned(),
-        (None, _) => format!("raw-0x{value:02X}"),
-    }
 }
 
 // ---------------------------------------------------------------- page building
@@ -1153,8 +1081,8 @@ fn add_control_row(builder: &mut Builder<'_>, index: usize, reading: &ControlRea
             let (slider, value_label) = builder.slider_row(
                 title,
                 description,
-                SLIDER_BASE_ID + index as u16,
-                VALUE_BASE_ID + index as u16,
+                Control::Slider(index).id(),
+                Control::ValueLabel(index).id(),
                 (0, 100),
                 value,
                 &format!("{value}%"),
@@ -1181,7 +1109,7 @@ fn add_control_row(builder: &mut Builder<'_>, index: usize, reading: &ControlRea
             let combo = builder.combo_row(
                 title,
                 description,
-                COMBO_BASE_ID + index as u16,
+                Control::Combo(index).id(),
                 &items,
                 selected,
             );
@@ -1223,7 +1151,7 @@ fn build_presets(builder: &mut Builder<'_>) {
     let widths = [60, 52, 68, 32, 32, 60];
     let gap = builder.px(6);
     let total: i32 = widths.iter().map(|w| builder.px(*w)).sum::<i32>() + gap * 5;
-    for (index, preset) in presets.iter().enumerate().take(PRESET_MAX) {
+    for (index, preset) in presets.iter().enumerate().take(ROW_LIMIT) {
         let current = matching
             .as_deref()
             .is_some_and(|name| dispcontrol_domain::preset_names_equal(name, &preset.name));
@@ -1237,16 +1165,17 @@ fn build_presets(builder: &mut Builder<'_>) {
         let mut x = builder.control_x(total);
         let y = top + (height - builder.px(32)) / 2;
         let buttons = [
-            (PRESET_APPLY_BASE_ID, "Apply"),
-            (PRESET_EDIT_BASE_ID, "Edit"),
-            (PRESET_RENAME_BASE_ID, "Rename"),
-            (PRESET_UP_BASE_ID, "\u{25B2}"),
-            (PRESET_DOWN_BASE_ID, "\u{25BC}"),
-            (PRESET_DELETE_BASE_ID, "Delete"),
+            (RowButton::Apply, "Apply"),
+            (RowButton::Edit, "Edit"),
+            (RowButton::Rename, "Rename"),
+            (RowButton::Up, "\u{25B2}"),
+            (RowButton::Down, "\u{25BC}"),
+            (RowButton::Delete, "Delete"),
         ];
-        for ((id, text), width) in buttons.iter().zip(widths) {
+        for ((button, text), width) in buttons.iter().zip(widths) {
             let width = builder.px(width);
-            builder.button(*id + index as u16, text, x, y, width);
+            let id = Control::PresetRow(*button, index).id();
+            builder.button(id, text, x, y, width);
             x += width + gap;
         }
     }
@@ -1264,7 +1193,7 @@ fn build_presets(builder: &mut Builder<'_>) {
     let edit = builder.create(
         w!("EDIT"),
         &draft,
-        PRESET_NAME_ID,
+        Control::PresetName.id(),
         WS_TABSTOP.0 | WS_BORDER.0 | ES_AUTOHSCROLL as u32,
         (
             builder.control_x(name_width),
@@ -1283,9 +1212,9 @@ fn build_presets(builder: &mut Builder<'_>) {
     );
     let y = top + (height - builder.px(32)) / 2;
     let x = builder.control_x(button_width * 2 + gap);
-    builder.button(PRESET_SAVE_ID, "Save current", x, y, button_width);
+    builder.button(Control::PresetSave.id(), "Save current", x, y, button_width);
     builder.button(
-        PRESET_SAVE_INPUT_ID,
+        Control::PresetSaveInput.id(),
         "Save incl. input source",
         x + button_width + gap,
         y,
@@ -1310,21 +1239,14 @@ fn build_presets(builder: &mut Builder<'_>) {
     let y = top + (height - builder.px(32)) / 2;
     let mut x = builder.control_x(total);
     for (id, text) in [
-        (PRESET_EXPORT_ID, "Export"),
-        (PRESET_IMPORT_ID, "Import"),
-        (PRESET_FOLDER_ID, "Open folder"),
+        (Control::PresetExport, "Export"),
+        (Control::PresetImport, "Import"),
+        (Control::PresetFolder, "Open folder"),
     ] {
-        builder.button(id, text, x, y, width);
+        builder.button(id.id(), text, x, y, width);
         x += width + gap;
     }
     builder.card_end();
-}
-
-fn exchange_path(location: &str) -> std::path::PathBuf {
-    std::path::Path::new(location)
-        .parent()
-        .map(|dir| dir.join(PRESET_EXCHANGE_FILE))
-        .unwrap_or_else(|| std::path::PathBuf::from(PRESET_EXCHANGE_FILE))
 }
 
 fn build_preset_detail(builder: &mut Builder<'_>, preset: &dispcontrol_domain::Preset) {
@@ -1340,7 +1262,7 @@ fn build_preset_detail(builder: &mut Builder<'_>, preset: &dispcontrol_domain::P
     );
     let x = builder.control_x(back_width);
     builder.button(
-        PRESET_BACK_ID,
+        Control::PresetBack.id(),
         "Back",
         x,
         top + (height - builder.px(32)) / 2,
@@ -1352,15 +1274,11 @@ fn build_preset_detail(builder: &mut Builder<'_>, preset: &dispcontrol_domain::P
     let edit_width = builder.px(70);
     let button_width = builder.px(72);
     let total = edit_width + button_width * 2 + gap * 2;
-    for (index, entry) in preset.entries.iter().enumerate().take(PRESET_MAX) {
-        let (text, current) = match entry.value {
-            ControlValue::Normalized(value) => (value.to_string(), format!("{value}%")),
-            ControlValue::Enum(value) => (value.to_string(), enum_label(entry.control, value)),
+    for (index, entry) in preset.entries.iter().enumerate().take(ROW_LIMIT) {
+        let text = match entry.value {
+            ControlValue::Normalized(value) | ControlValue::Enum(value) => value.to_string(),
         };
-        let mut description = format!("{} \u{2014} currently {current}", entry.monitor.as_str());
-        if preset.is_entry_inert(entry) {
-            description.push_str(" (not applied: the colour preset has its own gains)");
-        }
+        let description = preset_entry_description(preset, entry);
         let (top, height) = builder.row(control_title(entry.control), Some(&description), total);
         let x = builder.control_x(total);
         let edit_height = builder.px(30);
@@ -1368,21 +1286,21 @@ fn build_preset_detail(builder: &mut Builder<'_>, preset: &dispcontrol_domain::P
         builder.create(
             w!("EDIT"),
             &text,
-            PRESET_ENTRY_VALUE_BASE_ID + index as u16,
+            Control::EntryValue(index).id(),
             WS_TABSTOP.0 | WS_BORDER.0 | ES_NUMBER as u32 | ES_RIGHT as u32 | ES_AUTOHSCROLL as u32,
             (x, y, edit_width, edit_height),
             FontKind::Body,
         );
         let y = top + (height - builder.px(32)) / 2;
         builder.button(
-            PRESET_ENTRY_SET_BASE_ID + index as u16,
+            Control::Entry(EntryButton::Set, index).id(),
             "Set",
             x + edit_width + gap,
             y,
             button_width,
         );
         builder.button(
-            PRESET_ENTRY_REMOVE_BASE_ID + index as u16,
+            Control::Entry(EntryButton::Remove, index).id(),
             "Remove",
             x + edit_width + button_width + gap * 2,
             y,
@@ -1409,7 +1327,7 @@ fn build_safety(builder: &mut Builder<'_>) {
     builder.create(
         w!("BUTTON"),
         "",
-        CONFIRM_TOGGLE_ID,
+        Control::ConfirmToggle.id(),
         WS_TABSTOP.0 | BS_OWNERDRAW as u32,
         (
             builder.control_x(toggle_width),
@@ -1422,8 +1340,8 @@ fn build_safety(builder: &mut Builder<'_>) {
     let (_, revert_value) = builder.slider_row(
         "Automatic revert timeout",
         Some("Restore the previous input unless you choose Keep. 0 disables."),
-        REVERT_SLIDER_ID,
-        REVERT_SLIDER_ID + 100,
+        Control::RevertSlider.id(),
+        Control::RevertValue.id(),
         (0, 60),
         settings.input_revert_seconds,
         &format!("{} s", settings.input_revert_seconds),
@@ -1437,7 +1355,7 @@ fn build_safety(builder: &mut Builder<'_>) {
         "Write delay",
         Some("Changes are sent once, this long after you stop adjusting."),
         DEBOUNCE_ID,
-        DEBOUNCE_ID + 100,
+        Control::DebounceValue.id(),
         (150, 2000),
         settings.debounce_ms,
         &format!("{} ms", settings.debounce_ms),
@@ -1708,8 +1626,10 @@ pub(crate) fn draw_item(context: &WindowContext, item: &DRAWITEMSTRUCT) {
     let focused = item.itemState.0 & ODS_FOCUS.0 != 0;
     let pressed = item.itemState.0 & ODS_SELECTED.0 != 0;
 
-    if (NAV_BASE_ID..NAV_BASE_ID + PAGES.len() as u16).contains(&id) {
-        let index = (id - NAV_BASE_ID) as usize;
+    let control = Control::from_id(id);
+    if let Some(Control::Nav(index)) = control
+        && index < PAGES.len()
+    {
         let active = index == selected_page_index(state);
         unsafe {
             FillRect(
@@ -1772,7 +1692,7 @@ pub(crate) fn draw_item(context: &WindowContext, item: &DRAWITEMSTRUCT) {
             theme.text,
             DT_LEFT,
         );
-    } else if id == CONFIRM_TOGGLE_ID {
+    } else if control == Some(Control::ConfirmToggle) {
         let on = current_settings(context).confirm_input_change;
         unsafe {
             FillRect(
@@ -1877,63 +1797,69 @@ fn draw_text(
 pub(crate) fn handle_command(context: &mut WindowContext, wparam: WPARAM) {
     let id = (wparam.0 & 0xffff) as u16;
     let notification = ((wparam.0 >> 16) & 0xffff) as u32;
-    if (NAV_BASE_ID..NAV_BASE_ID + PAGES.len() as u16).contains(&id) {
-        let page = PAGES[(id - NAV_BASE_ID) as usize].0;
-        if page != context.modern.page {
-            context.modern.page = page;
-            context.modern.scroll_y = 0;
-            if page == Page::Presets {
-                let _ = context.model.refresh_presets();
-            }
-            rebuild(context);
-        }
-    } else if notification == 0 && id == PRESET_SAVE_ID {
-        save_preset(context, false);
-    } else if notification == 0 && id == PRESET_SAVE_INPUT_ID {
-        save_preset(context, true);
-    } else if notification == 0 && (PRESET_BACK_ID..=PRESET_FOLDER_ID).contains(&id) {
-        preset_file_action(context, id);
-    } else if notification == 0
-        && (PRESET_ENTRY_SET_BASE_ID..PRESET_ENTRY_REMOVE_BASE_ID + 100).contains(&id)
-    {
-        preset_entry_action(context, id);
-    } else if notification == 0
-        && ((PRESET_APPLY_BASE_ID..PRESET_DELETE_BASE_ID + 100).contains(&id)
-            || (PRESET_EDIT_BASE_ID..PRESET_EDIT_BASE_ID + 100).contains(&id))
-    {
-        preset_row_action(context, id);
-    } else if (VALUE_BASE_ID..VALUE_BASE_ID + 100).contains(&id) && notification == 0 {
-        begin_value_edit(context, id);
-    } else if id == EDIT_ID && notification == EN_KILLFOCUS {
-        finish_value_edit(context);
-    } else if id == REFRESH_ID {
+    if id == REFRESH_ID {
         refresh(context);
-    } else if id == MONITOR_ID && notification == CBN_SELCHANGE {
-        select_monitor(context);
-    } else if (COMBO_BASE_ID..COMBO_BASE_ID + 100).contains(&id) && notification == CBN_SELCHANGE {
-        apply_enum(context, id);
-    } else if id == CONFIRM_TOGGLE_ID {
-        let mut settings = current_settings(context);
-        settings.confirm_input_change = !settings.confirm_input_change;
-        queue_settings_save(context, settings);
-        if let Some(window) = context.modern.children.iter().find(|window| {
-            let id = unsafe { GetDlgCtrlID(**window) };
-            id == i32::from(CONFIRM_TOGGLE_ID)
-        }) {
-            unsafe {
-                let _ = InvalidateRect(Some(*window), None, true);
+        return;
+    }
+    if id == MONITOR_ID {
+        if notification == CBN_SELCHANGE {
+            select_monitor(context);
+        }
+        return;
+    }
+    let Some(control) = Control::from_id(id) else {
+        return;
+    };
+    let clicked = notification == 0;
+    match control {
+        Control::Nav(index) if index < PAGES.len() => {
+            let page = PAGES[index].0;
+            if page != context.modern.page {
+                context.modern.page = page;
+                context.modern.scroll_y = 0;
+                if page == Page::Presets {
+                    let _ = context.model.refresh_presets();
+                }
+                rebuild(context);
             }
         }
+        Control::PresetSave if clicked => save_preset(context, false),
+        Control::PresetSaveInput if clicked => save_preset(context, true),
+        Control::PresetBack
+        | Control::PresetExport
+        | Control::PresetImport
+        | Control::PresetFolder
+            if clicked =>
+        {
+            preset_file_action(context, control)
+        }
+        Control::Entry(button, index) if clicked => preset_entry_action(context, button, index),
+        Control::PresetRow(button, index) if clicked => preset_row_action(context, button, index),
+        Control::ValueLabel(_) if clicked => begin_value_edit(context, id),
+        Control::InlineEdit if notification == EN_KILLFOCUS => finish_value_edit(context),
+        Control::Combo(_) if notification == CBN_SELCHANGE => apply_enum(context, id),
+        Control::ConfirmToggle => {
+            let mut settings = current_settings(context);
+            settings.confirm_input_change = !settings.confirm_input_change;
+            queue_settings_save(context, settings);
+            if let Some(window) = context.modern.children.iter().find(|window| {
+                let id = unsafe { GetDlgCtrlID(**window) };
+                id == i32::from(Control::ConfirmToggle.id())
+            }) {
+                unsafe {
+                    let _ = InvalidateRect(Some(*window), None, true);
+                }
+            }
+        }
+        _ => {}
     }
 }
 
 fn read_preset_name(context: &WindowContext) -> Option<String> {
-    let edit = context
-        .modern
-        .children
-        .iter()
-        .copied()
-        .find(|window| unsafe { GetDlgCtrlID(*window) } == i32::from(PRESET_NAME_ID))?;
+    let edit =
+        context.modern.children.iter().copied().find(
+            |window| unsafe { GetDlgCtrlID(*window) } == i32::from(Control::PresetName.id()),
+        )?;
     let mut buffer = [0u16; 64];
     let length = unsafe { GetWindowTextW(edit, &mut buffer) }.max(0) as usize;
     Some(String::from_utf16_lossy(&buffer[..length]))
@@ -1971,9 +1897,7 @@ fn read_dialog_text(context: &WindowContext, id: u16) -> Option<String> {
     Some(String::from_utf16_lossy(&buffer[..length]))
 }
 
-fn preset_entry_action(context: &mut WindowContext, id: u16) {
-    let kind = id / 100 * 100;
-    let index = (id % 100) as usize;
+fn preset_entry_action(context: &mut WindowContext, button: EntryButton, index: usize) {
     let Some(name) = context.modern.editing_preset.clone() else {
         return;
     };
@@ -1986,17 +1910,16 @@ fn preset_entry_action(context: &mut WindowContext, id: u16) {
     else {
         return;
     };
-    let result = match kind {
-        PRESET_ENTRY_SET_BASE_ID => {
-            let text = read_dialog_text(context, PRESET_ENTRY_VALUE_BASE_ID + index as u16)
-                .unwrap_or_default();
-            let Ok(number) = text.trim().parse::<u32>() else {
-                set_status(context, "Enter a whole number.");
-                return;
-            };
-            let value = match entry.value {
-                ControlValue::Normalized(_) => ControlValue::Normalized(number),
-                ControlValue::Enum(_) => ControlValue::Enum(number),
+    let result = match button {
+        EntryButton::Set => {
+            let text =
+                read_dialog_text(context, Control::EntryValue(index).id()).unwrap_or_default();
+            let value = match parse_entry_value(&text, entry.value) {
+                Ok(value) => value,
+                Err(message) => {
+                    set_status(context, message);
+                    return;
+                }
             };
             let result = context
                 .model
@@ -2006,7 +1929,7 @@ fn preset_entry_action(context: &mut WindowContext, id: u16) {
             }
             result
         }
-        PRESET_ENTRY_REMOVE_BASE_ID => {
+        EntryButton::Remove => {
             let result = context
                 .model
                 .remove_preset_entry(&name, &entry.monitor, entry.control);
@@ -2015,7 +1938,6 @@ fn preset_entry_action(context: &mut WindowContext, id: u16) {
             }
             result
         }
-        _ => return,
     };
     match result {
         Ok(()) => rebuild(context),
@@ -2023,15 +1945,15 @@ fn preset_entry_action(context: &mut WindowContext, id: u16) {
     }
 }
 
-fn preset_file_action(context: &mut WindowContext, id: u16) {
+fn preset_file_action(context: &mut WindowContext, control: Control) {
     let path = exchange_path(&context.model.presets_location());
-    match id {
-        PRESET_BACK_ID => {
+    match control {
+        Control::PresetBack => {
             context.modern.editing_preset = None;
             context.modern.scroll_y = 0;
             rebuild(context);
         }
-        PRESET_EXPORT_ID => {
+        Control::PresetExport => {
             let message = match context.model.export_presets() {
                 Ok(text) => match std::fs::write(&path, text) {
                     Ok(()) => format!("Exported presets to {}.", path.display()),
@@ -2041,17 +1963,12 @@ fn preset_file_action(context: &mut WindowContext, id: u16) {
             };
             set_status(context, &message);
         }
-        PRESET_IMPORT_ID => {
+        Control::PresetImport => {
             let message = match std::fs::read_to_string(&path) {
                 Ok(text) => match context.model.import_presets(&text, false) {
                     Ok(summary) => {
                         rebuild(context);
-                        format!(
-                            "Imported {}: {} added, {} updated.",
-                            path.display(),
-                            summary.added,
-                            summary.updated
-                        )
+                        import_summary_message(&path, &summary)
                     }
                     Err(error) => error.to_string(),
                 },
@@ -2059,7 +1976,7 @@ fn preset_file_action(context: &mut WindowContext, id: u16) {
             };
             set_status(context, &message);
         }
-        PRESET_FOLDER_ID => {
+        Control::PresetFolder => {
             use windows::Win32::UI::Shell::ShellExecuteW;
             use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
             if let Some(dir) = path.parent() {
@@ -2080,9 +1997,7 @@ fn preset_file_action(context: &mut WindowContext, id: u16) {
     }
 }
 
-fn preset_row_action(context: &mut WindowContext, id: u16) {
-    let kind = id / 100 * 100;
-    let index = (id % 100) as usize;
+fn preset_row_action(context: &mut WindowContext, button: RowButton, index: usize) {
     let Some(name) = context
         .model
         .presets()
@@ -2091,32 +2006,16 @@ fn preset_row_action(context: &mut WindowContext, id: u16) {
     else {
         return;
     };
-    let result = match kind {
-        PRESET_APPLY_BASE_ID => match context.model.apply_preset(&name) {
+    let result = match button {
+        RowButton::Apply => match context.model.apply_preset(&name) {
             Ok(report) => {
-                let mut message = format!(
-                    "Applied '{}': {} changed, {} already set, {} skipped, {} failed.",
-                    report.preset,
-                    report.applied(),
-                    report.unchanged(),
-                    report.skipped(),
-                    report.failed()
-                );
-                if let Some(dispcontrol_app::EntryStatus::Failed(reason)) = report
-                    .outcomes
-                    .iter()
-                    .map(|outcome| &outcome.status)
-                    .find(|status| matches!(status, dispcontrol_app::EntryStatus::Failed(_)))
-                {
-                    message.push_str(&format!(" First failure: {reason}"));
-                }
-                set_status(context, &message);
+                set_status(context, &apply_report_message(&report));
                 rebuild(context);
                 return;
             }
             Err(error) => Err(error),
         },
-        PRESET_RENAME_BASE_ID => {
+        RowButton::Rename => {
             let new_name = read_preset_name(context).unwrap_or_default();
             let result = context.model.rename_preset(&name, &new_name);
             if result.is_ok() {
@@ -2128,21 +2027,20 @@ fn preset_row_action(context: &mut WindowContext, id: u16) {
             }
             result
         }
-        PRESET_EDIT_BASE_ID => {
+        RowButton::Edit => {
             context.modern.editing_preset = Some(name);
             context.modern.scroll_y = 0;
             Ok(())
         }
-        PRESET_UP_BASE_ID => context.model.move_preset(&name, -1),
-        PRESET_DOWN_BASE_ID => context.model.move_preset(&name, 1),
-        PRESET_DELETE_BASE_ID => {
+        RowButton::Up => context.model.move_preset(&name, -1),
+        RowButton::Down => context.model.move_preset(&name, 1),
+        RowButton::Delete => {
             let result = context.model.delete_preset(&name);
             if result.is_ok() {
                 set_status(context, &format!("Deleted preset '{name}'."));
             }
             result
         }
-        _ => return,
     };
     match result {
         Ok(()) => rebuild(context),
@@ -2197,7 +2095,7 @@ fn begin_value_edit(context: &mut WindowContext, id: u16) {
             points[1].x - points[0].x,
             points[1].y - points[0].y + 2 * pad,
             Some(content),
-            Some(HMENU(EDIT_ID as usize as *mut c_void)),
+            Some(HMENU(Control::InlineEdit.id() as usize as *mut c_void)),
             None,
             None,
         )
@@ -2383,7 +2281,8 @@ fn apply_enum(context: &mut WindowContext, id: u16) {
 pub(crate) fn on_hscroll(context: &mut WindowContext, slider: HWND) {
     let id = unsafe { GetDlgCtrlID(slider) } as u16;
     let position = send(slider, TBM_GETPOS, WPARAM(0), LPARAM(0)).0 as u32;
-    if (SLIDER_BASE_ID..SLIDER_BASE_ID + 100).contains(&id) {
+    let control = Control::from_id(id);
+    if let Some(Control::Slider(_)) = control {
         let Some(row) = context.modern.rows.iter().find(|row| row.slider == slider) else {
             return;
         };
@@ -2412,12 +2311,8 @@ pub(crate) fn on_hscroll(context: &mut WindowContext, slider: HWND) {
                 );
             }
         }
-    } else if id == REVERT_SLIDER_ID {
-        let seconds = if (1..5).contains(&position) {
-            5
-        } else {
-            position
-        };
+    } else if control == Some(Control::RevertSlider) {
+        let seconds = snap_revert_seconds(position);
         if seconds != position {
             send(slider, TBM_SETPOS, WPARAM(1), LPARAM(seconds as isize));
         }
@@ -2426,7 +2321,7 @@ pub(crate) fn on_hscroll(context: &mut WindowContext, slider: HWND) {
         settings.input_revert_seconds = seconds;
         queue_settings_save(context, settings);
     } else if id == DEBOUNCE_ID {
-        let milliseconds = ((position + 25) / 50 * 50).clamp(150, 2000);
+        let milliseconds = snap_debounce_ms(position);
         set_window_text(context.modern.delay_value, &format!("{milliseconds} ms"));
         let mut settings = current_settings(context);
         settings.debounce_ms = milliseconds;

@@ -126,7 +126,7 @@ Allowed dependencies (everything else is forbidden):
 |---|---|
 | `domain` | `std` only (plus tiny pure utility crates, e.g. a `thiserror`-style macro) |
 | `app` | `domain`, `std`, the `log` facade |
-| `mccs`, `ui-model`, `ipc`, `cli`, `ddc-fake` | `domain`, `app`; `ipc` and `cli` may use `serde_json`/`clap`-class parsing crates |
+| `mccs`, `ui-model`, `ipc`, `cli`, `ddc-fake` | `domain`, `app`; `ipc` and `cli` may use `serde_json`/`clap`-class parsing crates; `cli` uses `ipc` (it is a daemon client). Exception: `ipc` uses `windows` for its Windows-only named-pipe transport, until that moves into its own adapter crate. |
 | `ddc-windows`, `ddc-linux`, `store-file`, `ui-win32` | `domain`, `app`, `mccs`/`ui-model` as needed, and their OS or format crates (`windows`, `toml`, ...) |
 | `bin-*` | anything (composition roots) |
 
@@ -285,7 +285,7 @@ dispcontrol set brightness 40
 
 **`ddc-linux`:** ddcutil-compatible access through `/dev/i2c-*` (requires the `i2c-dev` module and group permission). Decided: it uses `ddcutil` (invoked as a subprocess behind the same `MonitorBackend` port; the package is a declared dependency of the Ubuntu package). A native implementation is a possible later replacement without core changes.
 
-**`ddc-fake`:** configurable simulated monitors (capabilities, latency, failures, hangs). Used by unit/integration tests and for demos.
+**`ddc-fake`:** configurable simulated monitors (capabilities, scripted read/write failures, disconnects; latency and hangs are not simulated yet) plus in-memory doubles of the other ports (settings, presets with an export/import round trip, a scripted input prompter, a manual clock) and a `Harness` that wires them into a `MonitorService`. Used by the `app`, `ipc`, `cli` and `ui-model` tests and for demos.
 
 ### 9.2 Persistence (`store-file`)
 - Single human-editable **TOML** file in `%APPDATA%\dispcontrol\config.toml` (`~/.config/dispcontrol/config.toml` on Linux); a `config.toml` beside the executable switches to portable mode (SPEC-DAT-1).
@@ -334,18 +334,20 @@ Every implementation change follows Clean Architecture and the test pyramid. Tes
 | Adapter/contract integration | Few | `ddc-windows`, `store-file`, `ipc`, `cli` | Test the adapter against its public port/protocol with narrow fixtures or local fakes. Keep real-hardware tests opt-in and explicitly gated; never make ordinary CI write to a monitor. |
 | System/UI/acceptance (tip) | Very few | composition roots and Windows UI | A small number of smoke checks exercise the assembled app. Hardware acceptance is a manual checklist on the reference display. Keep window procedures and OS calls as humble wrappers. |
 
+Where tests live: `app` use-case tests are integration tests in `crates/app/tests/` (unit tests inside `app` cannot use `ddc-fake`, which links the non-test build of `app`); `ui-model` has unit tests for pure text/label rules in `src/text.rs` and view-model tests in `tests/`; `cli` tests run the real argument parsing against the daemon dispatcher through `run_with` and an in-process transport; `ipc` tests cover dispatch over fakes and real named-pipe round trips on private pipe names; `ui-win32` tests only its pure control-ID table (`modern/ids.rs`).
+
 Do not duplicate the same assertion at every layer. Put each rule at the lowest layer that owns it, then add only the integration checks needed to prove boundaries are wired correctly. Default CI runs the unit, use-case, and safe adapter suites; it excludes physical monitor writes.
 
 ## 12. Enforcing the dependency rule (G15)
 - **Cargo workspace crates** are the primary boundary (a missing dependency cannot be imported).
-- **CI check:** a script parses `cargo metadata` and fails if any edge violates the table in section 5.3 (for example `domain -> anything`, `app -> windows|toml|serde`).
-- **Lints:** `#![forbid(unsafe_code)]` in `domain`, `app`, `ui-model`, `cli`; `cargo deny` bans OS/UI/format crates from inner crates.
+- **CI check:** `scripts/check_layers.py` parses `cargo metadata` and fails if any normal/build dependency violates the table in section 5.3 (for example `domain -> anything`, `app -> windows|toml|serde`), if a new crate has no rule, or if a crate listed below loses `#![forbid(unsafe_code)]`. Dev-dependencies are not checked.
+- **Lints:** `#![forbid(unsafe_code)]` in `domain`, `app`, `mccs`, `ui-model`, `cli`, `ddc-fake`. The per-crate allowlist in the layering script bans OS/UI/format crates from inner crates; `cargo deny` (licences, advisories) is not set up yet.
 - **Review rule:** new ports are added to `app`, never to adapters.
 
 ## 13. Build, packaging and CI
 - One Cargo workspace; the two executables are built from `bin-cli` and `bin-daemon`; C# plugins build with `dotnet` in separate CI jobs.
 - Targets: `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`.
-- CI: build, test, clippy, rustfmt, dependency-rule check, size and startup budget check on Windows.
+- CI (`.github/workflows/ci.yml`, `windows-latest`, MSVC toolchain): rustfmt, dependency-rule check, clippy, test, build. Size and startup budget checks are not automated yet. Local development on the reference machine uses the GNU toolchain (`x86_64-pc-windows-gnu`).
 - Distribution: GitHub Releases (unsigned at first), then winget; `.deb`/AppImage for Ubuntu. MIT license.
 
 ## 14. Decisions

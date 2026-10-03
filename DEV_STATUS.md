@@ -24,6 +24,7 @@ Both Settings presentations use the same view model and application API. The def
 - Input and volume behaviour was verified manually by the owner on the reference monitor (v0 acceptance); automated CI intentionally does not switch physical inputs.
 - Slider writes still read back after the buffered write; apply the same no-read-back approach if a DDC/CI read error appears right after a write.
 - Light theme, other display scales and a formal keyboard/accessibility review were not exhaustively covered by the v0 acceptance.
+- The CI workflow has not run yet: the repository has no GitHub remote. Window procedures and DDC/CI calls remain untested by design (humble objects); `ddc-fake` does not simulate latency or hangs yet.
 
 ## Next implementation steps
 
@@ -86,7 +87,8 @@ Latest recorded verification for the Windows GNU target:
 - `cargo test --workspace --target x86_64-pc-windows-gnu`
 - `cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings`
 - `cargo build --workspace --bins --target x86_64-pc-windows-gnu`
-- 47 workspace tests pass, including deterministic quiet-period/coalescing/rate-limit/input-revert tests, IPC dispatch success/error and settings persistence, CLI JSON usage cases, and settings-file replacement/backup behavior.
+- `python scripts/check_layers.py` (dependency rule, ARCH.md 5.3)
+- 99 workspace tests pass. Use-case tests (`crates/app/tests/`: write policy, input safety, presets incl. import/export, multi-monitor and failure cases) run on the shared `ddc-fake` crate; `ui-model` covers labels, value snapping, messages and view-model behaviour; the CLI is tested end to end against the daemon dispatcher (exit codes 2/3/5/7, export/import files); `ipc` includes real named-pipe round trips (max-size message, 8 concurrent clients, missing server); `ui-win32` checks that every control ID decodes back to its own control with no collisions.
 - Runtime smoke checks: CLI reports exit code 7 with a JSON error when the daemon is absent; with the daemon running, monitor listing, brightness read, settings JSON, 20 sequential requests, and 20 concurrent CLI/IPC requests succeeded. The default window opened at 880x720; `--native-ui` opened at 760x640; both served CLI requests. Closing the Settings window hid it without stopping the daemon, and the tray-icon left-click message restored it. An invalid daemon argument exits with code 1.
 
 No physical monitor input switch was performed during these checks. Manual acceptance of tray behavior (including Quit), settings persistence, input confirmation/revert and the colour-preset fix was completed by the owner on the reference setup; v0 is accepted.

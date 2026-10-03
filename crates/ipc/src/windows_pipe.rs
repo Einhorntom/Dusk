@@ -26,8 +26,16 @@ const PIPE_INSTANCE_LIMIT: u32 = 16;
 pub fn serve_forever(
     handler: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
 ) -> Result<(), IpcError> {
+    serve_forever_on(PIPE_NAME, handler)
+}
+
+/// Serves `handler` on the named pipe `name` (tests use a private name).
+pub(crate) fn serve_forever_on(
+    name: &str,
+    handler: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
+) -> Result<(), IpcError> {
     let handler = Arc::new(handler);
-    let encoded_name = wide_null(PIPE_NAME);
+    let encoded_name = wide_null(name);
     loop {
         let raw_pipe = unsafe {
             CreateNamedPipeW(
@@ -92,10 +100,14 @@ fn wait_for_client_close(pipe: &mut File) -> Result<(), IpcError> {
 }
 
 pub fn transact(payload: &[u8]) -> Result<Vec<u8>, IpcError> {
+    transact_on(PIPE_NAME, payload)
+}
+
+pub(crate) fn transact_on(name: &str, payload: &[u8]) -> Result<Vec<u8>, IpcError> {
     if payload.len() > MAX_MESSAGE_SIZE {
         return Err(IpcError::Protocol("request exceeds the 1 MiB limit".into()));
     }
-    let encoded_name = wide_null(PIPE_NAME);
+    let encoded_name = wide_null(name);
     let mut handle = None;
     for attempt in 0..10 {
         match open_pipe(&encoded_name) {

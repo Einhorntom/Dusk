@@ -22,6 +22,7 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 name = "dispcontrol-app"
 version = "0.1.0"
 dependencies = [
+ "dispcontrol-ddc-fake",
  "dispcontrol-domain",
 ]
 
@@ -50,9 +51,19 @@ dependencies = [
 name = "dispcontrol-cli"
 version = "0.1.0"
 dependencies = [
+ "dispcontrol-app",
+ "dispcontrol-ddc-fake",
  "dispcontrol-domain",
  "dispcontrol-ipc",
  "serde_json",
+]
+
+[[package]]
+name = "dispcontrol-ddc-fake"
+version = "0.1.0"
+dependencies = [
+ "dispcontrol-app",
+ "dispcontrol-domain",
 ]
 
 [[package]]
@@ -74,6 +85,7 @@ name = "dispcontrol-ipc"
 version = "0.1.0"
 dependencies = [
  "dispcontrol-app",
+ "dispcontrol-ddc-fake",
  "dispcontrol-domain",
  "serde",
  "serde_json",
@@ -100,6 +112,7 @@ name = "dispcontrol-ui-model"
 version = "0.1.0"
 dependencies = [
  "dispcontrol-app",
+ "dispcontrol-ddc-fake",
  "dispcontrol-domain",
 ]
 

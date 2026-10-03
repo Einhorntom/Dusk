@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+pub mod text;
+
 use dispcontrol_app::{Api, ApplyReport, ImportSummary, UseCaseError};
 use dispcontrol_domain::{
     AppSettings, ControlKey, ControlReading, ControlValue, Monitor, MonitorId, Preset, PresetEntry,

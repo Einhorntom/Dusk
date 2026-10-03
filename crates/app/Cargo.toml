@@ -6,3 +6,8 @@ publish = false
 
 [dependencies]
 dispcontrol-domain = { path = "../domain" }
+
+[dev-dependencies]
+# Integration tests in tests/ only: unit tests cannot use it, because it
+# links the non-test build of this crate.
+dispcontrol-ddc-fake = { path = "../ddc-fake" }

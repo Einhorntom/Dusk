@@ -1,5 +1,5 @@
 [package]
-name = "dispcontrol-ui-model"
+name = "dispcontrol-ddc-fake"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -7,6 +7,3 @@ publish = false
 [dependencies]
 dispcontrol-app = { path = "../app" }
 dispcontrol-domain = { path = "../domain" }
-
-[dev-dependencies]
-dispcontrol-ddc-fake = { path = "../ddc-fake" }

@@ -473,127 +473,19 @@ pub use windows_pipe::{serve_forever, transact};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dispcontrol_app::{
-        BackendError, Clock, InputChangePrompter, MonitorBackend, PresetRepository,
-        SettingsRepository,
-    };
-    use dispcontrol_domain::{ControlCapability, Monitor, MonitorId};
-    use std::sync::{Arc, Mutex};
-    use std::time::{Duration, Instant};
+    use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor, Harness};
+    use std::sync::Arc;
 
-    struct FakeBackend {
-        monitor: Monitor,
+    fn harness() -> Harness {
+        Harness::new(FakeBackend::single(FakeMonitor::new("fake-0").numeric(
+            ControlKey::Brightness,
+            50,
+            100,
+        )))
     }
 
-    impl MonitorBackend for FakeBackend {
-        fn list_monitors(&self) -> Result<Vec<Monitor>, BackendError> {
-            Ok(vec![self.monitor.clone()])
-        }
-
-        fn read_control(
-            &self,
-            monitor: &MonitorId,
-            control: ControlKey,
-        ) -> Result<Option<(ControlCapability, u32)>, BackendError> {
-            if monitor != &self.monitor.id {
-                return Err(BackendError::NotFound(format!(
-                    "monitor not found: {monitor}"
-                )));
-            }
-            if control != ControlKey::Brightness {
-                return Ok(None);
-            }
-            Ok(Some((
-                ControlCapability {
-                    key: control,
-                    native_min: 0,
-                    native_max: 100,
-                    enum_values: Vec::new(),
-                },
-                50,
-            )))
-        }
-
-        fn write_control(
-            &self,
-            _monitor: &MonitorId,
-            _control: ControlKey,
-            _native_value: u32,
-        ) -> Result<(), BackendError> {
-            Ok(())
-        }
-    }
-
-    struct MemorySettings(Mutex<AppSettings>);
-
-    impl SettingsRepository for MemorySettings {
-        fn load(&self) -> Result<AppSettings, BackendError> {
-            Ok(self.0.lock().unwrap().clone())
-        }
-
-        fn save(&self, settings: &AppSettings) -> Result<(), BackendError> {
-            *self.0.lock().unwrap() = settings.clone();
-            Ok(())
-        }
-    }
-
-    #[derive(Default)]
-    struct MemoryPresets(Mutex<Vec<Preset>>);
-
-    impl PresetRepository for MemoryPresets {
-        fn load_presets(&self) -> Result<Vec<Preset>, BackendError> {
-            Ok(self.0.lock().unwrap().clone())
-        }
-
-        fn save_presets(&self, presets: &[Preset]) -> Result<(), BackendError> {
-            *self.0.lock().unwrap() = presets.to_vec();
-            Ok(())
-        }
-    }
-
-    struct NoPrompts;
-
-    impl InputChangePrompter for NoPrompts {
-        fn confirm_input_change(&self, _monitor: &Monitor, _from: u32, _to: u32) -> bool {
-            false
-        }
-
-        fn confirm_keep_input(
-            &self,
-            _monitor: &Monitor,
-            _previous_input: u32,
-            _new_input: u32,
-            _timeout_seconds: u32,
-        ) -> Result<bool, String> {
-            Ok(false)
-        }
-    }
-
-    struct TestClock;
-
-    impl Clock for TestClock {
-        fn now(&self) -> Instant {
-            Instant::now()
-        }
-
-        fn sleep(&self, _duration: Duration) {}
-    }
-
-    fn service() -> MonitorService {
-        let backend = Arc::new(FakeBackend {
-            monitor: Monitor {
-                id: MonitorId::new("fake-0").unwrap(),
-                name: "Fake display".into(),
-                unstable_id: false,
-            },
-        });
-        MonitorService::new(
-            backend,
-            Arc::new(MemorySettings(Mutex::new(AppSettings::default()))),
-            Arc::new(MemoryPresets::default()),
-            Arc::new(NoPrompts),
-            Arc::new(TestClock),
-        )
+    fn service() -> Arc<MonitorService> {
+        harness().service
     }
 
     #[test]
@@ -742,12 +634,155 @@ mod tests {
         );
         assert_eq!(again["code"], 3);
     }
+    #[test]
+    fn dispatch_exports_and_imports_preset_documents() {
+        let h = harness();
+        call(&h.service, r#"{"op":"preset_save","name":"A"}"#);
+        let exported = call(&h.service, r#"{"op":"preset_export"}"#);
+        let text = exported["result"]["text"].as_str().unwrap().to_owned();
+        call(&h.service, r#"{"op":"preset_save","name":"B"}"#);
+
+        let request = serde_json::json!({ "op": "preset_import", "text": text, "replace": true });
+        let imported = call(&h.service, &request.to_string());
+        assert_eq!(imported["ok"], true);
+        assert_eq!(imported["result"]["added"], 1);
+        assert_eq!(imported["result"]["discarded"], 2);
+        assert_eq!(h.presets.stored().len(), 1);
+
+        let invalid = call(
+            &h.service,
+            r#"{"op":"preset_import","text":"not a document"}"#,
+        );
+        assert_eq!(invalid["code"], 2);
+        assert_eq!(h.presets.stored().len(), 1);
+        let path = call(&h.service, r#"{"op":"preset_path"}"#);
+        assert_eq!(path["result"]["path"], "memory://presets");
+    }
+
+    #[test]
+    fn dispatch_reports_failed_preset_entries_in_the_result() {
+        let h = harness();
+        call(&h.service, r#"{"op":"preset_save","name":"A"}"#);
+        call(
+            &h.service,
+            r#"{"op":"preset_set_entry","name":"A","monitor":"fake-0","control":"brightness","value":{"kind":"normalized","value":80}}"#,
+        );
+        let id = MonitorId::new("fake-0").unwrap();
+        h.backend.fail_writes(
+            &id,
+            ControlKey::Brightness,
+            BackendError::Failed("DDC/CI error".into()),
+        );
+        let applied = call(&h.service, r#"{"op":"preset_apply","name":"A"}"#);
+        assert_eq!(applied["ok"], true);
+        assert_eq!(applied["result"]["failed"], 1);
+    }
 }
 
-#[cfg(windows)]
+#[cfg(all(test, windows))]
 mod windows_tests {
+    //! Real named-pipe round trips on pipes private to each test; no monitor
+    //! is touched and the daemon's own pipe is never used.
+
+    use super::windows_pipe::{serve_forever_on, transact_on};
+    use super::{IpcError, MAX_MESSAGE_SIZE, dispatch};
+    use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor, Harness};
+    use dispcontrol_domain::ControlKey;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    fn unique_pipe_name() -> String {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        format!(
+            r"\\.\pipe\dispcontrol-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst)
+        )
+    }
+
+    /// Serves `handler` on a fresh pipe and waits until it accepts clients.
+    fn start_server(handler: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static) -> String {
+        let name = unique_pipe_name();
+        let server_name = name.clone();
+        thread::spawn(move || {
+            let _ = serve_forever_on(&server_name, handler);
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while transact_on(&name, b"").is_err() {
+            assert!(Instant::now() < deadline, "test pipe server did not start");
+            thread::sleep(Duration::from_millis(10));
+        }
+        name
+    }
+
     #[test]
     fn protocol_limit_is_one_megabyte() {
-        assert_eq!(super::MAX_MESSAGE_SIZE, 1_048_576);
+        assert_eq!(MAX_MESSAGE_SIZE, 1_048_576);
+    }
+
+    #[test]
+    fn a_request_round_trips_through_the_pipe() {
+        let name = start_server(|request| request.iter().rev().copied().collect());
+        assert_eq!(transact_on(&name, b"abc").unwrap(), b"cba");
+    }
+
+    #[test]
+    fn a_maximum_size_message_round_trips() {
+        let name = start_server(|request| request.to_vec());
+        let payload = vec![7u8; MAX_MESSAGE_SIZE];
+        assert_eq!(transact_on(&name, &payload).unwrap(), payload);
+    }
+
+    #[test]
+    fn an_oversized_request_is_rejected_before_connecting() {
+        let payload = vec![0u8; MAX_MESSAGE_SIZE + 1];
+        assert!(matches!(
+            transact_on(&unique_pipe_name(), &payload),
+            Err(IpcError::Protocol(_))
+        ));
+    }
+
+    #[test]
+    fn a_missing_server_is_reported_as_daemon_unavailable() {
+        assert!(matches!(
+            transact_on(&unique_pipe_name(), b"{}"),
+            Err(IpcError::DaemonUnavailable)
+        ));
+    }
+
+    #[test]
+    fn concurrent_clients_each_get_their_own_response() {
+        let name = start_server(|request| request.to_vec());
+        let clients: Vec<_> = (0..8)
+            .map(|client| {
+                let name = name.clone();
+                thread::spawn(move || {
+                    for request in 0..5 {
+                        let payload = format!("client {client} request {request}");
+                        let response = transact_on(&name, payload.as_bytes()).unwrap();
+                        assert_eq!(response, payload.as_bytes());
+                    }
+                })
+            })
+            .collect();
+        for client in clients {
+            client.join().expect("client thread panicked");
+        }
+    }
+
+    #[test]
+    fn the_daemon_dispatcher_answers_over_the_pipe() {
+        let service = Harness::new(FakeBackend::single(FakeMonitor::new("fake-0").numeric(
+            ControlKey::Brightness,
+            50,
+            100,
+        )))
+        .service;
+        let name = start_server(move |request| dispatch(&service, request));
+        let response: serde_json::Value =
+            serde_json::from_slice(&transact_on(&name, br#"{"op":"list"}"#).unwrap()).unwrap();
+        assert_eq!(response["ok"], true);
+        assert_eq!(response["result"][0]["id"], "fake-0");
     }
 }
