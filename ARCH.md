@@ -1,6 +1,6 @@
 # dispcontrol: Architecture
 
-Status: Draft v0.2. Derived from [PRD.md](./PRD.md) and [SPEC.md](./SPEC.md). Describes *how* the product is built. Requirement IDs (`SPEC-...`) refer to the spec. Items marked **Open** need a decision or a spike result.
+Status: Draft v0.3; v0 implementation in progress. Derived from [PRD.md](./PRD.md) and [SPEC.md](./SPEC.md). Describes *how* the product is built. Requirement IDs (`SPEC-...`) refer to the spec. Items marked **Open** need a decision or a spike result.
 
 ## 1. Purpose and scope
 This document defines the structure of dispcontrol: layers, modules (Rust crates), the interfaces between them, the runtime model, and the platform-specific parts. It follows Clean Architecture (section 2), and section 3 explains how each guideline is applied here.
@@ -27,6 +27,7 @@ These are the guidelines from Robert C. Martin's *Clean Architecture*, stated as
 | G13 | **Screaming architecture** | The structure shows what the system does (monitor control, presets, schedule), not which framework it uses. |
 | G14 | **Component principles** | Cohesion: REP (reuse/release equivalence), CCP (common closure), CRP (common reuse). Coupling: ADP (acyclic dependencies), SDP (depend toward stability), SAP (stable abstractions). |
 | G15 | **Boundaries are enforced, not hoped for** | The dependency rule must be checkable by tooling, not only by review. |
+| G16 | **Test pyramid** | Prefer many fast, deterministic tests of inner policies, fewer adapter/contract integration tests, and only a small number of end-to-end or real-hardware checks. Keep UI and OS tests at the narrowest practical seams. |
 
 ## 3. How this architecture follows the guidelines
 
@@ -47,6 +48,7 @@ These are the guidelines from Robert C. Martin's *Clean Architecture*, stated as
 | G13 Screaming | Crate and module names are `monitor`, `control`, `preset`, `schedule`, `write_policy`, `input_safety`, not `windows`, `serde`, `ui`. |
 | G14 Component principles | See section 5.3. |
 | G15 Enforcement | CI checks the crate graph (section 12) and forbids `unsafe` and OS/framework crates in `domain` and `app`. |
+| G16 Test pyramid | Domain policy is validated with fast unit tests; app use cases with fakes; adapters with focused contract/integration tests; only a small smoke/acceptance layer uses the whole process or real hardware (section 11). |
 
 ## 4. System context
 ```mermaid
@@ -321,16 +323,18 @@ Reuses `domain`, `app`, `ipc`, `cli`, `store-file`. Adds `ddc-linux`. `dispcontr
 - **Performance budgets:** idle 0% CPU, under 30 MB RSS, under 10 MB binary, under 300 ms to tray (SPEC-NFR-1). Measured in CI/perf scripts on the reference machine. Release profile: size-optimized, LTO, `panic = "abort"` where safe.
 - **Time:** the domain never reads the clock; `Clock` supplies monotonic and local time. DST and clock changes are handled by re-deriving the next trigger on `TimeChanged` (SPEC-SCH-7).
 
-## 11. Testing strategy
-| Level | Target | Approach |
-|---|---|---|
-| Unit | `domain` | Pure functions and state machines with explicit `now`: normalization round-trips, preset diff and order, schedule evaluation (DST, missed rules, ties), write buffer, rate limiter, input-safety policy. Property tests for normalization and schedule. |
-| Unit | `mccs` | Capability-string parser against real and malformed strings (corpus collected during the spike). |
-| Use case | `app` | Fake ports (`ddc-fake`, in-memory repository, fake `Clock`, scripted `Prompter`). Deterministic tests of: one write per drag, no write at startup/exit, equal-value skip, revert on timeout, preset single confirmation, wake catch-up, hung monitor does not block others. |
-| Contract | `MonitorBackend` | A shared test suite runs against `ddc-fake` always, and against real hardware in an opt-in, `#[ignore]`d mode (writes only to brightness/contrast within safe ranges, and restores values). |
-| Adapter | `store-file`, `ipc`, `cli` | Golden files for config (including corrupt files), protocol round-trips, CLI output and exit codes using `ddc-fake`. |
-| UI | `ui-model` | Plain unit tests. `ui-win32` kept humble; smoke-tested manually and with a small scripted run. |
-| Acceptance | SPEC section 15 | Automated against `ddc-fake` where possible; the hardware items (L32p-30 over USB-C) are a manual checklist. |
+## 11. Testing strategy: test pyramid
+
+Every implementation change follows Clean Architecture and the test pyramid. Tests live beside the layer they validate; inner-layer tests must not require Windows, a display, disk, or a running daemon. Test doubles implement outward ports instead of pulling adapters inward.
+
+| Pyramid layer | Relative amount | Target | Approach |
+|---|---:|---|---|
+| Unit (base) | Many | `domain`, pure `mccs` parsing, `ui-model` | Fast deterministic tests of pure rules and transformations. Pass time and randomness explicitly. No OS, filesystem, device, or process dependencies. |
+| Use-case/component | Several | `app` | In-memory fake ports and controlled clocks/prompts. Verify observable calls and outcomes: no startup/exit writes, equal-value skip, input confirmation gate, buffering/rate limits, failures. |
+| Adapter/contract integration | Few | `ddc-windows`, `store-file`, `ipc`, `cli` | Test the adapter against its public port/protocol with narrow fixtures or local fakes. Keep real-hardware tests opt-in and explicitly gated; never make ordinary CI write to a monitor. |
+| System/UI/acceptance (tip) | Very few | composition roots and Windows UI | A small number of smoke checks exercise the assembled app. Hardware acceptance is a manual checklist on the reference display. Keep window procedures and OS calls as humble wrappers. |
+
+Do not duplicate the same assertion at every layer. Put each rule at the lowest layer that owns it, then add only the integration checks needed to prove boundaries are wired correctly. Default CI runs the unit, use-case, and safe adapter suites; it excludes physical monitor writes.
 
 ## 12. Enforcing the dependency rule (G15)
 - **Cargo workspace crates** are the primary boundary (a missing dependency cannot be imported).
@@ -345,11 +349,17 @@ Reuses `domain`, `app`, `ipc`, `cli`, `store-file`. Adds `ddc-linux`. `dispcontr
 - Distribution: GitHub Releases (unsigned at first), then winget; `.deb`/AppImage for Ubuntu. MIT license.
 
 ## 14. Implementation order (architecture view of the phases)
-1. **Phase 0 spike:** `ddc-windows` prototype plus `mccs` against the L32p-30 on Iris Xe over USB-C: capability string, read and write brightness, input, volume; record latencies and capability corpus. Decides the open Dxva2 question before the rest is built.
-2. **v0 (first release):** `domain`, `app` (read/set/write policy, input-safety confirmation), `ddc-fake`, `ddc-windows`, `store-file`, `ipc`, `bin-daemon`, `ui-model` + `ui-win32` (tray icon, Settings window with Monitors, Safety and General pages only), `cli`, `bin-cli`. Contract tests. The widget kit (sliders, dropdowns, buttons) is prototyped first.
+1. **Phase 0 spike:** Windows DDC/CI discovery, reads, and a guarded brightness write/restore are verified on the L32p-30 over USB-C on Intel Iris Xe; see [`spikes/windows-ddc/results.md`](./spikes/windows-ddc/results.md). Input and volume writes remain untested.
+2. **v0 (first release):** Implement dependencies inward-out: `domain`, `app` (read/set/write policy and input-safety confirmation), `mccs`, then adapters (`ddc-windows`, `store-file`, `ipc`), followed by `bin-daemon` composition root and daemon-only `cli`/`bin-cli`, and finally `ui-model` + `ui-win32` (tray icon and Settings for the monitor controls and safety options actually implemented). Validate each slice with the test pyramid in section 11; prototype sliders/dropdowns in the window only after the control API exists.
 3. **v1:** presets and hotkeys use cases, tray panel, Presets and Hotkeys pages, C# integrations (PowerToys Run, Command Palette).
 4. **v2:** schedule use case, system events, Schedule page.
 5. **v3:** `ddc-linux` (ddcutil), headless daemon, Linux packaging; OSD, installer, winget, docs. The Linux Settings window is deferred.
+
+### v0 implementation snapshot
+
+Implemented in the current workspace: the Windows DDC/CI adapter, discovered monitor controls, a daemon-only CLI (`list`, `get`, `set`, `settings show`, and `--json`), named-pipe IPC, TOML settings persistence with Windows atomic replacement, and a native Settings window that hides to a notification-area icon when minimized or closed. Its settings surface exposes the slider quiet period, input-change confirmation, and timed input-revert options; unimplemented settings are not presented.
+
+This is not yet a v0-complete release. Input changes use a timed "Keep input" prompt and automatically restore the prior value on timeout or cancellation. The slider quiet period currently buffers slider movement in the UI only; explicit writes are synchronous and the application enforces per-monitor/control rate limits by waiting, rather than using the planned latest-wins engine queue. A sustained rate-limited write can therefore delay its caller. Tray interaction and input-switch rollback still need manual Windows verification. Linux, presets, hotkeys, schedules, integrations, and other deferred release features remain out of scope for v0.
 
 ## 15. Decisions
 
@@ -386,7 +396,7 @@ Reuses `domain`, `app`, `ipc`, `cli`, `store-file`. Adds `ddc-linux`. `dispcontr
 | SPEC-NFR | runtime model (section 7), cross-cutting (section 10), CI budgets (section 13) |
 
 ## 17. Risks and open questions
-- **Open: Dxva2 over Intel Iris Xe via USB-C (DP Alt Mode)** may not expose DDC/CI or may be unreliable. Mitigated by the Phase 0 spike and the `MonitorBackend` boundary (alternative adapter possible).
+- **Phase 0 evidence: Windows monitor-configuration DDC/CI works on Intel Iris Xe over USB-C (DP Alt Mode).** Capability discovery and brightness/input/volume reads succeeded; a reversible brightness write and restore succeeded in 65 ms each. Input and volume writes are still unverified; see [`spikes/windows-ddc/results.md`](./spikes/windows-ddc/results.md). The `MonitorBackend` boundary still allows an alternative adapter if write support proves unreliable.
 - **Open: custom-drawn UI cost.** Direct2D widgets need text input (IME, caret, selection), keyboard navigation and UI Automation for accessibility (SPEC-UI-7). Proposed mitigation: build the Settings window first with a small widget kit and evaluate whether to host standard themed Win32 controls for text/time inputs if the cost is too high. Because the Settings window is now in the first release, this decision moves forward: prototype the widget kit (sliders, dropdowns, buttons) at the start of v0 and decide on hosting standard Win32 controls for text/time inputs there.
 - **Resolved: CLI without daemon.** The CLI never accesses monitors; with no daemon it errors (exit 7), so all rate limits live in one process.
 - **Resolved: Ubuntu uses `ddcutil`.** Remaining risk: subprocess latency and parsing its output; mitigated by the `MonitorBackend` port and contract tests.

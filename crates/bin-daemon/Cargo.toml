@@ -1,0 +1,22 @@
+[package]
+name = "dispcontrol-bin-daemon"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "dispcontrold"
+path = "src/main.rs"
+
+[dependencies]
+dispcontrol-app = { path = "../app" }
+dispcontrol-ddc-windows = { path = "../ddc-windows" }
+dispcontrol-domain = { path = "../domain" }
+dispcontrol-ipc = { path = "../ipc" }
+dispcontrol-store-file = { path = "../store-file" }
+dispcontrol-ui-win32 = { path = "../ui-win32" }
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }

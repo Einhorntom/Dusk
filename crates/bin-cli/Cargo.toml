@@ -1,0 +1,12 @@
+[package]
+name = "dispcontrol-bin-cli"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "dispcontrol"
+path = "src/main.rs"
+
+[dependencies]
+dispcontrol-cli = { path = "../cli" }

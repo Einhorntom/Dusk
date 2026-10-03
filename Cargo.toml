@@ -1,0 +1,16 @@
+[workspace]
+members = [
+    "crates/domain",
+    "crates/app",
+    "crates/mccs",
+    "crates/ddc-windows",
+    "crates/ipc",
+    "crates/store-file",
+    "crates/cli",
+    "crates/bin-cli",
+    "crates/bin-daemon",
+    "crates/ui-model",
+    "crates/ui-win32",
+    "spikes/windows-ddc",
+]
+resolver = "3"
