@@ -101,6 +101,8 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-UI-5: The panel follows the system light/dark theme and has a native Windows 11 appearance.
 - SPEC-UI-6: Settings include: hotkeys, step sizes, schedule rules, write delay, live preview, input confirmation and revert timer, on-screen indicator, start with Windows, audit log, monitor aliases.
 - SPEC-UI-7: The panel is fully keyboard-operable and exposes names/values to screen readers.
+- SPEC-UI-10 (v0 Settings): The default Settings window follows the visual design and interaction structure of `mockups/settings.html`, including a Windows 11-style navigation/sidebar, grouped content cards, monitor selection and controls, and safety/write settings. It shows only implemented features: discovered monitor selection and controls, quiet-period write setting, input-change confirmation, and input-revert timer. Presets, Hotkeys, and Schedule pages are omitted until those features are implemented; unsupported controls are not displayed as available.
+- SPEC-UI-11 (Windows presentation fallback): `dispcontrold --native-ui` opens the original compact Win32 layout instead of the default grouped Settings layout. Both presentations use the same application API and behavior.
 
 ## 10. Command line
 Executable: `dispcontrol`. Global flags: `--json`, `--monitor <id|alias|index>`, `--quiet`.

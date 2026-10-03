@@ -33,7 +33,7 @@ impl Clock for DesktopClock {
 impl InputChangePrompter for DesktopInputPrompter {
     fn confirm_input_change(&self, monitor: &Monitor, from: u32, to: u32) -> bool {
         let text = wide_null(&format!(
-            "Changing this input may disconnect devices connected to the monitor's USB hub or leave the display without a picture.\n\nMonitor: {}\nInput: {} -> {}\n\nContinue?",
+            "Changing this input may disconnect devices connected to the monitor's USB hub or leave the display without a picture. The previous input might not be restorable if the monitor stops responding to this PC.\n\nMonitor: {}\nInput: {} -> {}\n\nContinue?",
             monitor.name, from, to
         ));
         let title = wide_null("Confirm monitor input change");
@@ -135,6 +135,15 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    let native_ui = match arguments.as_slice() {
+        [] => false,
+        [argument] if argument == "--native-ui" => true,
+        _ => {
+            return Err("usage: dispcontrold [--native-ui]".into());
+        }
+    };
+
     let path = FileSettingsRepository::default_path()?;
     let backend = Arc::new(WindowsDdcBackend::new());
     let settings: Arc<dyn SettingsRepository> = Arc::new(FileSettingsRepository::new(path));
@@ -153,7 +162,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("dispcontrold IPC server stopped: {error}");
         }
     });
-    dispcontrol_ui_win32::run(service)?;
+    dispcontrol_ui_win32::run_with_native_ui(service, native_ui)?;
     Ok(())
 }
 

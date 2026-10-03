@@ -45,6 +45,7 @@ const MENU_QUIT: usize = 201;
 
 struct WindowContext {
     model: MonitorSettingsModel,
+    native_ui: bool,
     monitor_combo: HWND,
     control_combo: HWND,
     value_edit: HWND,
@@ -59,6 +60,10 @@ struct WindowContext {
 }
 
 pub fn run(api: Arc<dyn Api>) -> Result<(), String> {
+    run_with_native_ui(api, false)
+}
+
+pub fn run_with_native_ui(api: Arc<dyn Api>, native_ui: bool) -> Result<(), String> {
     let instance = unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None) }
         .map_err(|error| error.to_string())?;
     let class = WNDCLASSW {
@@ -73,6 +78,7 @@ pub fn run(api: Arc<dyn Api>) -> Result<(), String> {
 
     let mut context = Box::new(WindowContext {
         model: MonitorSettingsModel::new(api),
+        native_ui,
         monitor_combo: HWND::default(),
         control_combo: HWND::default(),
         value_edit: HWND::default(),
@@ -94,8 +100,8 @@ pub fn run(api: Arc<dyn Api>) -> Result<(), String> {
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            760,
-            640,
+            if native_ui { 760 } else { 880 },
+            if native_ui { 640 } else { 720 },
             None,
             None,
             Some(HINSTANCE(instance.0)),
@@ -200,6 +206,13 @@ unsafe extern "system" fn window_proc(
             let position =
                 unsafe { SendMessageW(context.slider, TBM_GETPOS, WPARAM(0), LPARAM(0)).0 as u32 };
             set_text(context.value_edit, &position.to_string());
+            if let Err(error) = context
+                .model
+                .adjust_selected_value(ControlValue::Normalized(position))
+            {
+                set_status(context, &error.to_string());
+                return LRESULT(0);
+            }
             unsafe {
                 let _ = KillTimer(Some(window), SLIDER_TIMER);
                 if SetTimer(
@@ -243,6 +256,13 @@ unsafe extern "system" fn window_proc(
 }
 
 fn create_controls(context: &mut WindowContext) -> Result<(), String> {
+    if context.native_ui {
+        return create_native_controls(context);
+    }
+    create_settings_controls(context)
+}
+
+fn create_native_controls(context: &mut WindowContext) -> Result<(), String> {
     context.monitor_combo = control(
         context.window,
         w!("COMBOBOX"),
@@ -372,6 +392,181 @@ fn create_controls(context: &mut WindowContext) -> Result<(), String> {
     }
     set_text(context.revert_edit, "10");
     Ok(())
+}
+
+fn create_settings_controls(context: &mut WindowContext) -> Result<(), String> {
+    label(context.window, "Monitor settings", 24, 18, 420, 38)?;
+    label(
+        context.window,
+        "Read and adjust only the controls supported by the selected display.",
+        26,
+        50,
+        760,
+        24,
+    )?;
+    group_box(context.window, "Selected monitor", 20, 82, 820, 86)?;
+    group_box(context.window, "Display controls", 20, 178, 820, 252)?;
+    group_box(
+        context.window,
+        "Safety and write settings",
+        20,
+        442,
+        820,
+        170,
+    )?;
+
+    context.monitor_combo = control(
+        context.window,
+        w!("COMBOBOX"),
+        MONITOR_ID,
+        40,
+        116,
+        780,
+        CBS_DROPDOWNLIST | WS_TABSTOP.0 as i32,
+    )?;
+    context.control_combo = control(
+        context.window,
+        w!("COMBOBOX"),
+        CONTROL_ID,
+        40,
+        212,
+        300,
+        CBS_DROPDOWNLIST | WS_TABSTOP.0 as i32,
+    )?;
+    context.value_edit = control(
+        context.window,
+        w!("EDIT"),
+        VALUE_ID,
+        365,
+        212,
+        110,
+        ES_AUTOHSCROLL | ES_NUMBER | WS_TABSTOP.0 as i32,
+    )?;
+    context.enum_combo = control(
+        context.window,
+        w!("COMBOBOX"),
+        ENUM_VALUE_ID,
+        365,
+        212,
+        200,
+        CBS_DROPDOWNLIST | WS_TABSTOP.0 as i32,
+    )?;
+    context.slider = control(
+        context.window,
+        TRACKBAR_CLASSW,
+        SLIDER_ID,
+        42,
+        284,
+        776,
+        TBS_AUTOTICKS as i32 | WS_TABSTOP.0 as i32,
+    )?;
+    context.debounce_edit = control(
+        context.window,
+        w!("EDIT"),
+        DEBOUNCE_ID,
+        178,
+        486,
+        100,
+        ES_AUTOHSCROLL | ES_NUMBER | WS_TABSTOP.0 as i32,
+    )?;
+    context.confirm_check = control(
+        context.window,
+        w!("BUTTON"),
+        CONFIRM_ID,
+        40,
+        526,
+        520,
+        BS_AUTOCHECKBOX | WS_TABSTOP.0 as i32,
+    )?;
+    set_text(
+        context.confirm_check,
+        "Confirm input changes away from the active input",
+    );
+    context.revert_edit = control(
+        context.window,
+        w!("EDIT"),
+        REVERT_ID,
+        252,
+        568,
+        80,
+        ES_AUTOHSCROLL | ES_NUMBER | WS_TABSTOP.0 as i32,
+    )?;
+    context.status = control(context.window, w!("STATIC"), STATUS_ID, 24, 630, 800, 0)?;
+
+    label(context.window, "Monitor", 40, 94, 100, 18)?;
+    label(context.window, "Control", 40, 190, 110, 18)?;
+    label(context.window, "Value (0-100)", 365, 190, 160, 18)?;
+    label(
+        context.window,
+        "Drag to adjust; the value is written after the quiet period.",
+        42,
+        254,
+        660,
+        22,
+    )?;
+    label(context.window, "Quiet period (ms)", 40, 488, 130, 26)?;
+    label(
+        context.window,
+        "Revert timer (sec; 0 disables)",
+        40,
+        568,
+        205,
+        26,
+    )?;
+    button(context.window, REFRESH_ID, "Refresh", 590, 210, 100, 34)?;
+    button(context.window, APPLY_ID, "Apply value", 710, 210, 110, 36)?;
+    button(
+        context.window,
+        SAVE_SETTINGS_ID,
+        "Save settings",
+        680,
+        560,
+        140,
+        36,
+    )?;
+
+    unsafe {
+        SendMessageW(
+            context.slider,
+            TBM_SETRANGE,
+            WPARAM(1),
+            LPARAM(100isize << 16),
+        );
+        SendMessageW(context.confirm_check, BM_SETCHECK, WPARAM(1), LPARAM(0));
+    }
+    set_text(context.revert_edit, "10");
+    Ok(())
+}
+
+fn group_box(
+    parent: HWND,
+    text: &'static str,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<(), String> {
+    let text = wide_null(text);
+    unsafe {
+        CreateWindowExW(
+            Default::default(),
+            w!("BUTTON"),
+            PCWSTR(text.as_ptr()),
+            WS_CHILD
+                | WS_VISIBLE
+                | WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_GROUPBOX as u32),
+            x,
+            y,
+            width,
+            height,
+            Some(parent),
+            None,
+            None,
+            None,
+        )
+        .map(|_| ())
+        .map_err(|error| format!("creating group box: {error}"))
+    }
 }
 
 fn add_tray_icon(context: &mut WindowContext) -> Result<(), String> {
@@ -789,16 +984,36 @@ fn apply_value(context: &mut WindowContext) {
 }
 
 fn commit_slider(context: &mut WindowContext) {
-    let value = unsafe { SendMessageW(context.slider, TBM_GETPOS, WPARAM(0), LPARAM(0)).0 as u32 };
-    if let Some(control) = context.model.selected_control() {
-        context.model.select_control(control);
-    }
-    match context
-        .model
-        .set_selected_value(ControlValue::Normalized(value))
-    {
-        Ok(true) => set_status(context, "Buffered monitor setting applied."),
-        Ok(false) => set_status(context, "Value is unchanged; no monitor write was sent."),
+    match context.model.flush_pending_adjustments() {
+        Ok((committed, Some(next_wake))) => {
+            if committed > 0 {
+                update_control_view(context);
+            }
+            let delay = next_wake.as_millis().clamp(1, u32::MAX as u128) as u32;
+            if unsafe { SetTimer(Some(context.window), SLIDER_TIMER, delay, None) } == 0 {
+                set_status(
+                    context,
+                    "A monitor change remains queued, but its rate-limit timer could not be started.",
+                );
+                return;
+            }
+            if committed > 0 {
+                set_status(
+                    context,
+                    "Buffered monitor setting applied; another change is queued.",
+                );
+            } else {
+                set_status(
+                    context,
+                    "Monitor setting queued until the write limit allows it.",
+                );
+            }
+        }
+        Ok((committed, None)) if committed > 0 => {
+            update_control_view(context);
+            set_status(context, "Buffered monitor setting applied.");
+        }
+        Ok((_, None)) => set_status(context, "Value is unchanged; no monitor write was sent."),
         Err(error) => set_status(context, &error.to_string()),
     }
 }
