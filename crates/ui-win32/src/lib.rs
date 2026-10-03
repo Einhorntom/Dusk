@@ -2,6 +2,7 @@ use std::ffi::c_void;
 use std::sync::Arc;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
+use windows::Win32::UI::Controls::DRAWITEMSTRUCT;
 use windows::Win32::UI::Controls::{TBM_SETPOS, TBM_SETRANGE, TBS_AUTOTICKS, TRACKBAR_CLASSW};
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
@@ -10,12 +11,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, BM_GETCHECK, BM_SETCHECK, BS_AUTOCHECKBOX, CB_ADDSTRING, CB_GETCURSEL,
     CB_SETCURSEL, CBN_SELCHANGE, CBS_DROPDOWNLIST, CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW,
     DestroyMenu, DestroyWindow, DispatchMessageW, ES_AUTOHSCROLL, ES_NUMBER, GetCursorPos,
-    GetMessageW, GetWindowTextW, HMENU, IDI_APPLICATION, KillTimer, LoadIconW, MF_STRING, MSG,
-    PostQuitMessage, RegisterClassW, SC_MINIMIZE, SW_HIDE, SW_SHOW,
+    GetMessageW, GetWindowTextW, HMENU, IDI_APPLICATION, IsDialogMessageW, KillTimer, LoadIconW,
+    MF_STRING, MSG, PostQuitMessage, RegisterClassW, SC_MINIMIZE, SW_HIDE, SW_SHOW,
     SendMessageW as send_message_raw, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
     SetWindowTextW, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage,
-    WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HSCROLL, WM_NCCREATE,
-    WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+    WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORSTATIC, WM_DESTROY,
+    WM_DRAWITEM, WM_ERASEBKGND, WM_HSCROLL, WM_NCCREATE, WM_SETTINGCHANGE, WM_SIZE, WM_SYSCOMMAND,
+    WM_TIMER, WNDCLASSW, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -37,15 +39,19 @@ const SAVE_SETTINGS_ID: u16 = 110;
 const STATUS_ID: u16 = 111;
 const ENUM_VALUE_ID: u16 = 112;
 const SLIDER_TIMER: usize = 1;
+const SETTINGS_TIMER: usize = 2;
 const TBM_GETPOS: u32 = 0x0400;
 const TRAY_MESSAGE: u32 = WM_APP + 1;
 const TRAY_ID: u32 = 1;
 const MENU_SETTINGS: usize = 200;
 const MENU_QUIT: usize = 201;
 
+mod modern;
+
 struct WindowContext {
     model: MonitorSettingsModel,
     native_ui: bool,
+    modern: modern::State,
     monitor_combo: HWND,
     control_combo: HWND,
     value_edit: HWND,
@@ -75,10 +81,19 @@ pub fn run_with_native_ui(api: Arc<dyn Api>, native_ui: bool) -> Result<(), Stri
     if unsafe { RegisterClassW(&class) } == 0 {
         return Err("RegisterClassW failed".into());
     }
+    if !native_ui {
+        modern::register_content_class(HINSTANCE(instance.0))?;
+    }
+    let (window_width, window_height) = if native_ui {
+        (760, 640)
+    } else {
+        modern::initial_window_size()
+    };
 
     let mut context = Box::new(WindowContext {
         model: MonitorSettingsModel::new(api),
         native_ui,
+        modern: modern::State::new(),
         monitor_combo: HWND::default(),
         control_combo: HWND::default(),
         value_edit: HWND::default(),
@@ -100,8 +115,8 @@ pub fn run_with_native_ui(api: Arc<dyn Api>, native_ui: bool) -> Result<(), Stri
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            if native_ui { 760 } else { 880 },
-            if native_ui { 640 } else { 720 },
+            window_width,
+            window_height,
             None,
             None,
             Some(HINSTANCE(instance.0)),
@@ -111,19 +126,24 @@ pub fn run_with_native_ui(api: Arc<dyn Api>, native_ui: bool) -> Result<(), Stri
     .map_err(|error| format!("CreateWindowExW failed: {error}"))?;
     context.window = window;
     unsafe {
-        let dark_mode = BOOL(1);
-        let _ = DwmSetWindowAttribute(
-            window,
-            DWMWA_USE_IMMERSIVE_DARK_MODE,
-            (&dark_mode as *const BOOL).cast(),
-            std::mem::size_of::<BOOL>() as u32,
-        );
+        if native_ui {
+            let dark_mode = BOOL(1);
+            let _ = DwmSetWindowAttribute(
+                window,
+                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                (&dark_mode as *const BOOL).cast(),
+                std::mem::size_of::<BOOL>() as u32,
+            );
+        }
         let _ = ShowWindow(window, SW_SHOW);
     }
 
     let mut message = MSG::default();
     while unsafe { GetMessageW(&mut message, None, 0, 0) }.0 > 0 {
         unsafe {
+            if !native_ui && IsDialogMessageW(window, &message).as_bool() {
+                continue;
+            }
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -199,10 +219,52 @@ unsafe extern "system" fn window_proc(
             return LRESULT(0);
         }
         if message == WM_COMMAND {
-            handle_command(context, wparam, lparam);
+            if context.native_ui {
+                handle_command(context, wparam, lparam);
+            } else {
+                modern::handle_command(context, wparam);
+            }
             return LRESULT(0);
         }
+        if !context.native_ui {
+            match message {
+                WM_SIZE => {
+                    modern::on_size(context);
+                    return LRESULT(0);
+                }
+                WM_ERASEBKGND => {
+                    modern::paint_main_background(
+                        context,
+                        windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut c_void),
+                    );
+                    return LRESULT(1);
+                }
+                WM_CTLCOLORSTATIC => {
+                    if let Some(result) = modern::main_ctl_color(
+                        context,
+                        windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut c_void),
+                        HWND(lparam.0 as *mut c_void),
+                    ) {
+                        return result;
+                    }
+                }
+                WM_DRAWITEM => {
+                    let item = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
+                    modern::draw_item(context, item);
+                    return LRESULT(1);
+                }
+                WM_SETTINGCHANGE => {
+                    modern::on_theme_change(context);
+                    return LRESULT(0);
+                }
+                _ => {}
+            }
+        }
         if message == WM_HSCROLL {
+            if !context.native_ui {
+                modern::on_hscroll(context, HWND(lparam.0 as *mut c_void));
+                return LRESULT(0);
+            }
             let position =
                 unsafe { SendMessageW(context.slider, TBM_GETPOS, WPARAM(0), LPARAM(0)).0 as u32 };
             set_text(context.value_edit, &position.to_string());
@@ -237,6 +299,10 @@ unsafe extern "system" fn window_proc(
             commit_slider(context);
             return LRESULT(0);
         }
+        if message == WM_TIMER && wparam.0 == SETTINGS_TIMER {
+            modern::save_pending_settings(context);
+            return LRESULT(0);
+        }
     }
     if message == WM_DESTROY {
         if !context_pointer.is_null() {
@@ -259,7 +325,7 @@ fn create_controls(context: &mut WindowContext) -> Result<(), String> {
     if context.native_ui {
         return create_native_controls(context);
     }
-    create_settings_controls(context)
+    modern::create_controls(context)
 }
 
 fn create_native_controls(context: &mut WindowContext) -> Result<(), String> {
@@ -392,181 +458,6 @@ fn create_native_controls(context: &mut WindowContext) -> Result<(), String> {
     }
     set_text(context.revert_edit, "10");
     Ok(())
-}
-
-fn create_settings_controls(context: &mut WindowContext) -> Result<(), String> {
-    label(context.window, "Monitor settings", 24, 18, 420, 38)?;
-    label(
-        context.window,
-        "Read and adjust only the controls supported by the selected display.",
-        26,
-        50,
-        760,
-        24,
-    )?;
-    group_box(context.window, "Selected monitor", 20, 82, 820, 86)?;
-    group_box(context.window, "Display controls", 20, 178, 820, 252)?;
-    group_box(
-        context.window,
-        "Safety and write settings",
-        20,
-        442,
-        820,
-        170,
-    )?;
-
-    context.monitor_combo = control(
-        context.window,
-        w!("COMBOBOX"),
-        MONITOR_ID,
-        40,
-        116,
-        780,
-        CBS_DROPDOWNLIST | WS_TABSTOP.0 as i32,
-    )?;
-    context.control_combo = control(
-        context.window,
-        w!("COMBOBOX"),
-        CONTROL_ID,
-        40,
-        212,
-        300,
-        CBS_DROPDOWNLIST | WS_TABSTOP.0 as i32,
-    )?;
-    context.value_edit = control(
-        context.window,
-        w!("EDIT"),
-        VALUE_ID,
-        365,
-        212,
-        110,
-        ES_AUTOHSCROLL | ES_NUMBER | WS_TABSTOP.0 as i32,
-    )?;
-    context.enum_combo = control(
-        context.window,
-        w!("COMBOBOX"),
-        ENUM_VALUE_ID,
-        365,
-        212,
-        200,
-        CBS_DROPDOWNLIST | WS_TABSTOP.0 as i32,
-    )?;
-    context.slider = control(
-        context.window,
-        TRACKBAR_CLASSW,
-        SLIDER_ID,
-        42,
-        284,
-        776,
-        TBS_AUTOTICKS as i32 | WS_TABSTOP.0 as i32,
-    )?;
-    context.debounce_edit = control(
-        context.window,
-        w!("EDIT"),
-        DEBOUNCE_ID,
-        178,
-        486,
-        100,
-        ES_AUTOHSCROLL | ES_NUMBER | WS_TABSTOP.0 as i32,
-    )?;
-    context.confirm_check = control(
-        context.window,
-        w!("BUTTON"),
-        CONFIRM_ID,
-        40,
-        526,
-        520,
-        BS_AUTOCHECKBOX | WS_TABSTOP.0 as i32,
-    )?;
-    set_text(
-        context.confirm_check,
-        "Confirm input changes away from the active input",
-    );
-    context.revert_edit = control(
-        context.window,
-        w!("EDIT"),
-        REVERT_ID,
-        252,
-        568,
-        80,
-        ES_AUTOHSCROLL | ES_NUMBER | WS_TABSTOP.0 as i32,
-    )?;
-    context.status = control(context.window, w!("STATIC"), STATUS_ID, 24, 630, 800, 0)?;
-
-    label(context.window, "Monitor", 40, 94, 100, 18)?;
-    label(context.window, "Control", 40, 190, 110, 18)?;
-    label(context.window, "Value (0-100)", 365, 190, 160, 18)?;
-    label(
-        context.window,
-        "Drag to adjust; the value is written after the quiet period.",
-        42,
-        254,
-        660,
-        22,
-    )?;
-    label(context.window, "Quiet period (ms)", 40, 488, 130, 26)?;
-    label(
-        context.window,
-        "Revert timer (sec; 0 disables)",
-        40,
-        568,
-        205,
-        26,
-    )?;
-    button(context.window, REFRESH_ID, "Refresh", 590, 210, 100, 34)?;
-    button(context.window, APPLY_ID, "Apply value", 710, 210, 110, 36)?;
-    button(
-        context.window,
-        SAVE_SETTINGS_ID,
-        "Save settings",
-        680,
-        560,
-        140,
-        36,
-    )?;
-
-    unsafe {
-        SendMessageW(
-            context.slider,
-            TBM_SETRANGE,
-            WPARAM(1),
-            LPARAM(100isize << 16),
-        );
-        SendMessageW(context.confirm_check, BM_SETCHECK, WPARAM(1), LPARAM(0));
-    }
-    set_text(context.revert_edit, "10");
-    Ok(())
-}
-
-fn group_box(
-    parent: HWND,
-    text: &'static str,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-) -> Result<(), String> {
-    let text = wide_null(text);
-    unsafe {
-        CreateWindowExW(
-            Default::default(),
-            w!("BUTTON"),
-            PCWSTR(text.as_ptr()),
-            WS_CHILD
-                | WS_VISIBLE
-                | WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_GROUPBOX as u32),
-            x,
-            y,
-            width,
-            height,
-            Some(parent),
-            None,
-            None,
-            None,
-        )
-        .map(|_| ())
-        .map_err(|error| format!("creating group box: {error}"))
-    }
 }
 
 fn add_tray_icon(context: &mut WindowContext) -> Result<(), String> {
@@ -788,6 +679,10 @@ fn handle_command(context: &mut WindowContext, wparam: WPARAM, _lparam: LPARAM) 
 }
 
 fn refresh(context: &mut WindowContext) {
+    if !context.native_ui {
+        modern::refresh(context);
+        return;
+    }
     match context.model.refresh() {
         Ok(()) => {
             populate_monitors(context);
@@ -986,7 +881,7 @@ fn apply_value(context: &mut WindowContext) {
 fn commit_slider(context: &mut WindowContext) {
     match context.model.flush_pending_adjustments() {
         Ok((committed, Some(next_wake))) => {
-            if committed > 0 {
+            if committed > 0 && context.native_ui {
                 update_control_view(context);
             }
             let delay = next_wake.as_millis().clamp(1, u32::MAX as u128) as u32;
@@ -1010,7 +905,9 @@ fn commit_slider(context: &mut WindowContext) {
             }
         }
         Ok((committed, None)) if committed > 0 => {
-            update_control_view(context);
+            if context.native_ui {
+                update_control_view(context);
+            }
             set_status(context, "Buffered monitor setting applied.");
         }
         Ok((_, None)) => set_status(context, "Value is unchanged; no monitor write was sent."),

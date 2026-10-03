@@ -10,24 +10,23 @@ The repository contains a Windows-first Rust workspace following the crate bound
 - CLI commands: `list`, `get`, `set`, `settings show`, plus `--json`.
 - Daemon-only CLI operation over Windows named-pipe IPC.
 - TOML settings persistence with Windows file replacement.
-- Default grouped Win32 Settings window with monitor/control selection, slider, apply/refresh, quiet-period setting, input-change confirmation, and configurable input-revert timer. The previous compact layout remains available with `dispcontrold --native-ui`.
+- Default mock-style Settings window (Windows 11 sidebar, cards, light/dark following the system theme) with Monitors, Safety & writes, and General pages: monitor selection, supported-control chips, sliders/combos, quiet-period write setting, input-change confirmation, and input-revert timer. The compact layout remains available with `dispcontrold --native-ui`.
 - Notification-area tray icon; minimizing or closing Settings hides the window, and the tray menu can reopen Settings or quit.
 - Confirmation before changing the active monitor input, plus a timed keep/revert prompt.
 
-Both Settings presentations use the same view model and application API. The current grouped default is a functional prototype, not yet the mock-matching UI required for v0. The mock is [mockups/settings.html](./mockups/settings.html); tray behavior and input switching/rollback also need the remaining manual acceptance checks below.
+Both Settings presentations use the same view model and application API. The default UI follows [mockups/settings.html](./mockups/settings.html) for the implemented v0 features only (no theme selector; theme follows Windows; Presets/Hotkeys/Schedule pages omitted). A screenshot of the default window on the reference monitor was reviewed; tray behavior and input switching/rollback still need the manual acceptance checks below.
 
 ## Known gaps before v0 is complete
 
 - Add interactive Windows acceptance checks for tray hide/restore/quit, Settings persistence, monitor reads, and input confirmation/revert. Do not automate potentially disruptive physical input changes in ordinary CI.
 - Input and volume writes have not been verified on the reference monitor; Phase 0 evidence is recorded in [spikes/windows-ddc/results.md](./spikes/windows-ddc/results.md).
-- The `--native-ui` argument selects the previous compact layout; invalid daemon arguments are rejected with a usage error.
-- The default Settings UI still needs to be implemented to match the Windows 11 visual design and interaction structure of [mockups/settings.html](./mockups/settings.html). The current grouped Win32 window is not sufficient to close v0.
+- The `--native-ui` argument selects the compact layout; invalid daemon arguments are rejected with a usage error.
+- The mock-matching UI has had one visual pass at 150% scale (system-DPI aware); light theme, other scales and keyboard/accessibility review remain.
 
 ## Next implementation steps
 
 1. Run the interactive Windows v0 acceptance flow on the reference setup, including the input revert path when safe to do so.
-2. Implement the mock-matching Windows 11 Settings UI as the default, while showing only v0 features that are implemented.
-3. Visually review the mock-matching UI and the compact `--native-ui` fallback at the reference Windows 11 display scale; correct clipping and accessibility issues.
+2. Review light theme, other display scales and keyboard navigation of the default UI and the `--native-ui` fallback; correct clipping and accessibility issues.
 
 ## Release plan and version scope
 
