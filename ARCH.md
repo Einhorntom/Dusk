@@ -1,6 +1,6 @@
 # dispcontrol: Architecture
 
-Status: Draft v0.3; v0 implementation in progress. Derived from [PRD.md](./PRD.md) and [SPEC.md](./SPEC.md). Describes *how* the product is built. Requirement IDs (`SPEC-...`) refer to the spec. Items marked **Open** need a decision or a spike result.
+Status: Architecture v0.3. Derived from [PRD.md](./PRD.md) and [SPEC.md](./SPEC.md). Describes *how* the product is built. Requirement IDs (`SPEC-...`) refer to the spec.
 
 ## 1. Purpose and scope
 This document defines the structure of dispcontrol: layers, modules (Rust crates), the interfaces between them, the runtime model, and the platform-specific parts. It follows Clean Architecture (section 2), and section 3 explains how each guideline is applied here.
@@ -348,20 +348,7 @@ Do not duplicate the same assertion at every layer. Put each rule at the lowest 
 - CI: build, test, clippy, rustfmt, dependency-rule check, size and startup budget check on Windows.
 - Distribution: GitHub Releases (unsigned at first), then winget; `.deb`/AppImage for Ubuntu. MIT license.
 
-## 14. Implementation order (architecture view of the phases)
-1. **Phase 0 spike:** Windows DDC/CI discovery, reads, and a guarded brightness write/restore are verified on the L32p-30 over USB-C on Intel Iris Xe; see [`spikes/windows-ddc/results.md`](./spikes/windows-ddc/results.md). Input and volume writes remain untested.
-2. **v0 (first release):** Implement dependencies inward-out: `domain`, `app` (read/set/write policy and input-safety confirmation), `mccs`, then adapters (`ddc-windows`, `store-file`, `ipc`), followed by `bin-daemon` composition root and daemon-only `cli`/`bin-cli`, and finally `ui-model` + `ui-win32` (tray icon and Settings for the monitor controls and safety options actually implemented). Validate each slice with the test pyramid in section 11; prototype sliders/dropdowns in the window only after the control API exists.
-3. **v1:** presets and hotkeys use cases, tray panel, Presets and Hotkeys pages, C# integrations (PowerToys Run, Command Palette).
-4. **v2:** schedule use case, system events, Schedule page.
-5. **v3:** `ddc-linux` (ddcutil), headless daemon, Linux packaging; OSD, installer, winget, docs. The Linux Settings window is deferred.
-
-### v0 implementation snapshot
-
-Implemented in the current workspace: the Windows DDC/CI adapter, discovered monitor controls, a daemon-only CLI (`list`, `get`, `set`, `settings show`, and `--json`), named-pipe IPC, TOML settings persistence with Windows atomic replacement, and a native Settings window that hides to a notification-area icon when minimized or closed. Its settings surface exposes the slider quiet period, input-change confirmation, and timed input-revert options; unimplemented settings are not presented.
-
-This is not yet a v0-complete release. Input changes use a timed "Keep input" prompt and automatically restore the prior value on timeout or cancellation. The slider quiet period currently buffers slider movement in the UI only; explicit writes are synchronous and the application enforces per-monitor/control rate limits by waiting, rather than using the planned latest-wins engine queue. A sustained rate-limited write can therefore delay its caller. Tray interaction and input-switch rollback still need manual Windows verification. Linux, presets, hotkeys, schedules, integrations, and other deferred release features remain out of scope for v0.
-
-## 15. Decisions
+## 14. Decisions
 
 | # | Decision | Rationale |
 |---|---|---|
@@ -378,8 +365,9 @@ This is not yet a v0-complete release. Input changes use a timed "Keep input" pr
 | D11 | `windows-rs` + Direct2D + DWM UI | Native Windows 11 look at minimal footprint (user decision). |
 | D12 | Hung DDC call handled by worker replacement | Calls cannot be cancelled; this guarantees UI and other monitors stay responsive. |
 | D13 | Graphics resources released when windows are hidden | Meets the idle memory budget. |
+| D14 | UI implementations depend on the same application API | The UI selection is made at the composition root; alternate presentations must not duplicate or bypass application policies. |
 
-## 16. Traceability (spec to design)
+## 15. Traceability (spec to design)
 | Spec area | Primary components |
 |---|---|
 | SPEC-CTL, SPEC-QRK | `domain` (capabilities, normalization, quirk type), `mccs`, `ddc-*`, `app::discover` |
@@ -395,11 +383,10 @@ This is not yet a v0-complete release. Input changes use a timed "Keep input" pr
 | SPEC-DAT | `store-file` |
 | SPEC-NFR | runtime model (section 7), cross-cutting (section 10), CI budgets (section 13) |
 
-## 17. Risks and open questions
-- **Phase 0 evidence: Windows monitor-configuration DDC/CI works on Intel Iris Xe over USB-C (DP Alt Mode).** Capability discovery and brightness/input/volume reads succeeded; a reversible brightness write and restore succeeded in 65 ms each. Input and volume writes are still unverified; see [`spikes/windows-ddc/results.md`](./spikes/windows-ddc/results.md). The `MonitorBackend` boundary still allows an alternative adapter if write support proves unreliable.
-- **Open: custom-drawn UI cost.** Direct2D widgets need text input (IME, caret, selection), keyboard navigation and UI Automation for accessibility (SPEC-UI-7). Proposed mitigation: build the Settings window first with a small widget kit and evaluate whether to host standard themed Win32 controls for text/time inputs if the cost is too high. Because the Settings window is now in the first release, this decision moves forward: prototype the widget kit (sliders, dropdowns, buttons) at the start of v0 and decide on hosting standard Win32 controls for text/time inputs there.
-- **Resolved: CLI without daemon.** The CLI never accesses monitors; with no daemon it errors (exit 7), so all rate limits live in one process.
-- **Resolved: Ubuntu uses `ddcutil`.** Remaining risk: subprocess latency and parsing its output; mitigated by the `MonitorBackend` port and contract tests.
+## 16. Design risks and constraints
+- Monitor DDC/CI implementations vary in responsiveness and supported writes. The `MonitorBackend` port allows an alternative adapter if a transport or graphics path is unreliable.
+- Direct2D widgets require text input (IME, caret, selection), keyboard navigation and UI Automation for accessibility (SPEC-UI-7). All UI implementations use the same `ui-model` and application API; presentation-specific code stays in outer-layer adapters.
+- Ubuntu monitor control uses `ddcutil`; subprocess latency and output parsing remain adapter concerns behind `MonitorBackend`.
 - Monitors that hang or return bad capability data: handled by timeouts, probing and quirk profiles.
 - PowerToys plugin and Command Palette APIs change between releases: isolated in `integrations/`, depending only on the stable IPC protocol.
 - Wayland limits for global hotkeys and tray: handled by the portal and CLI-bound shortcuts; the UI crate for Linux is deferred.
