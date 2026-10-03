@@ -79,8 +79,29 @@ impl MonitorSettingsModel {
             .selected_control
             .ok_or(UseCaseError::SettingsInvalid("no control is selected"))?;
         let changed = self.api.set(monitor, control, value)?;
-        self.refresh_controls()?;
+        self.refresh_selected_control()?;
         Ok(changed)
+    }
+
+    pub fn adjust_selected_value(&self, value: ControlValue) -> Result<(), UseCaseError> {
+        let monitor = self
+            .selected_monitor
+            .as_ref()
+            .ok_or(UseCaseError::SettingsInvalid("no monitor is selected"))?;
+        let control = self
+            .selected_control
+            .ok_or(UseCaseError::SettingsInvalid("no control is selected"))?;
+        self.api.adjust(monitor, control, value)
+    }
+
+    pub fn flush_pending_adjustments(
+        &mut self,
+    ) -> Result<(usize, Option<std::time::Duration>), UseCaseError> {
+        let (committed, next_wake) = self.api.flush_pending_adjustments()?;
+        if committed > 0 {
+            self.refresh_selected_control()?;
+        }
+        Ok((committed, next_wake))
     }
 
     pub fn update_settings(&mut self, settings: AppSettings) -> Result<(), UseCaseError> {
@@ -142,6 +163,37 @@ impl MonitorSettingsModel {
                 .any(|reading| Some(reading.capability.key) == self.selected_control)
         {
             self.selected_control = Some(self.available_controls[0].capability.key);
+        }
+        Ok(())
+    }
+
+    fn refresh_selected_control(&mut self) -> Result<(), UseCaseError> {
+        let (Some(monitor), Some(control)) =
+            (self.selected_monitor.as_ref(), self.selected_control)
+        else {
+            return Ok(());
+        };
+        match self.api.read(monitor, control) {
+            Ok(reading) => {
+                if let Some(existing) = self
+                    .available_controls
+                    .iter_mut()
+                    .find(|existing| existing.capability.key == control)
+                {
+                    *existing = reading;
+                } else {
+                    self.available_controls.push(reading);
+                }
+            }
+            Err(UseCaseError::UnsupportedControl(_)) => {
+                self.available_controls
+                    .retain(|reading| reading.capability.key != control);
+                self.selected_control = self
+                    .available_controls
+                    .first()
+                    .map(|reading| reading.capability.key);
+            }
+            Err(error) => return Err(error),
         }
         Ok(())
     }
