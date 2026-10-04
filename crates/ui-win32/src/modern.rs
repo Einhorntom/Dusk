@@ -33,11 +33,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, PCWSTR, w};
 
 mod ids;
+pub(crate) mod osd;
 
+use dispcontrol_domain::{HotkeyAction, HotkeyBinding, KeyCombo, STEPPABLE_CONTROLS};
 use dispcontrol_ui_model::text::{
     apply_report_message, control_description, control_title, enum_label, exchange_path,
-    import_summary_message, parse_entry_value, preset_entry_description, snap_debounce_ms,
-    snap_revert_seconds,
+    hotkey_action_choices, hotkey_action_label, hotkey_description, import_summary_message,
+    parse_entry_value, preset_entry_description, snap_debounce_ms, snap_revert_seconds,
 };
 use ids::{Control, EntryButton, ROW_LIMIT, RowButton};
 
@@ -76,13 +78,15 @@ const WM_SIZE: u32 = 0x0005;
 pub(crate) enum Page {
     Monitors,
     Presets,
+    Hotkeys,
     Safety,
     General,
 }
 
-const PAGES: [(Page, &str, &str); 4] = [
+const PAGES: [(Page, &str, &str); 5] = [
     (Page::Monitors, "\u{E7F4}", "Monitors"),
     (Page::Presets, "\u{E8FD}", "Presets"),
+    (Page::Hotkeys, "\u{E765}", "Hotkeys"),
     (Page::Safety, "\u{EA18}", "Safety & writes"),
     (Page::General, "\u{E713}", "General"),
 ];
@@ -212,6 +216,7 @@ pub(crate) struct State {
     rows: Vec<RowControl>,
     delay_value: HWND,
     revert_value: HWND,
+    step_values: [HWND; 3],
     pending_settings: Option<AppSettings>,
     preset_name: String,
     editing_preset: Option<String>,
@@ -239,6 +244,7 @@ impl State {
             rows: Vec::new(),
             delay_value: HWND::default(),
             revert_value: HWND::default(),
+            step_values: [HWND::default(); 3],
             pending_settings: None,
             preset_name: String::new(),
             editing_preset: None,
@@ -256,7 +262,7 @@ fn send(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe { send_message_raw(window, message, Some(wparam), Some(lparam)) }
 }
 
-fn system_uses_dark() -> bool {
+pub(crate) fn system_uses_dark() -> bool {
     let mut data: u32 = 1;
     let mut size = size_of::<u32>() as u32;
     let result = unsafe {
@@ -940,6 +946,7 @@ fn build_page(context: &mut WindowContext, client_w: i32) {
     match page {
         Page::Monitors => build_monitors(&mut builder),
         Page::Presets => build_presets(&mut builder),
+        Page::Hotkeys => build_hotkeys(&mut builder),
         Page::Safety => build_safety(&mut builder),
         Page::General => build_general(&mut builder),
     }
@@ -1308,6 +1315,159 @@ fn build_preset_detail(builder: &mut Builder<'_>, preset: &dispcontrol_domain::P
         );
     }
     builder.card_end();
+}
+
+fn build_hotkeys(builder: &mut Builder<'_>) {
+    use windows::Win32::UI::WindowsAndMessaging::{ES_AUTOHSCROLL, WS_BORDER};
+    builder.heading("Hotkeys");
+    let bindings: Vec<HotkeyBinding> = builder.context.model.hotkeys().to_vec();
+    let settings = current_settings(builder.context);
+
+    builder.section("Configured hotkeys");
+    builder.card_begin();
+    if bindings.is_empty() {
+        builder.row(
+            "No hotkeys yet",
+            Some("Add one below. Hotkeys work while the Settings window is closed."),
+            0,
+        );
+    }
+    let remove_width = builder.px(90);
+    for (index, binding) in bindings.iter().enumerate().take(ROW_LIMIT) {
+        let failure = builder
+            .context
+            .hotkeys
+            .failure(&binding.keys)
+            .map(str::to_owned);
+        let description = hotkey_description(binding, failure.as_deref());
+        let (top, height) =
+            builder.row(&binding.keys.to_string(), Some(&description), remove_width);
+        let x = builder.control_x(remove_width);
+        builder.button(
+            Control::HotkeyRemove(index).id(),
+            "Remove",
+            x,
+            top + (height - builder.px(32)) / 2,
+            remove_width,
+        );
+    }
+    builder.card_end();
+
+    builder.section("Add a hotkey");
+    builder.card_begin();
+    let field_width = builder.px(280);
+    let (top, height) = builder.row(
+        "Keys",
+        Some("Click here and press the combination, e.g. Ctrl+Alt+Up. Use Ctrl, Alt or Win, or a function key alone. Backspace clears."),
+        field_width,
+    );
+    let keys = builder.create(
+        w!("EDIT"),
+        "",
+        Control::HotkeyKeys.id(),
+        WS_TABSTOP.0 | WS_BORDER.0 | ES_AUTOHSCROLL as u32,
+        (
+            builder.control_x(field_width),
+            top + (height - builder.px(30)) / 2,
+            field_width,
+            builder.px(30),
+        ),
+        FontKind::Body,
+    );
+    unsafe {
+        let _ = windows::Win32::UI::Shell::SetWindowSubclass(
+            keys,
+            Some(crate::hotkeys::recording_subclass),
+            2,
+            0,
+        );
+    }
+    let actions: Vec<String> = hotkey_choices(builder.context)
+        .iter()
+        .map(hotkey_action_label)
+        .collect();
+    builder.combo_row(
+        "Action",
+        None,
+        Control::HotkeyAction.id(),
+        &actions,
+        Some(0),
+    );
+    let mut monitors = vec!["All monitors".to_owned()];
+    monitors.extend(
+        builder
+            .context
+            .model
+            .monitors()
+            .iter()
+            .map(|monitor| monitor.name.clone()),
+    );
+    builder.combo_row(
+        "Monitor",
+        Some("Preset actions always use the monitors stored in the preset."),
+        Control::HotkeyMonitor.id(),
+        &monitors,
+        Some(0),
+    );
+    let add_width = builder.px(120);
+    let (top, height) = builder.row("", None, add_width);
+    let x = builder.control_x(add_width);
+    builder.button(
+        Control::HotkeyAdd.id(),
+        "Add hotkey",
+        x,
+        top + (height - builder.px(32)) / 2,
+        add_width,
+    );
+    builder.card_end();
+
+    builder.section("Steps and indicator");
+    builder.card_begin();
+    for (index, control) in STEPPABLE_CONTROLS.iter().enumerate() {
+        let step = settings.step_for(*control).unwrap_or(5);
+        let (_, value) = builder.slider_row(
+            &format!("{} step", control_title(*control)),
+            None,
+            Control::StepSlider(index).id(),
+            Control::StepValue(index).id(),
+            (1, 25),
+            step,
+            &format!("{step}%"),
+        );
+        builder.context.modern.step_values[index] = value;
+    }
+    let toggle_width = builder.px(44);
+    let (top, height) = builder.row(
+        "Show on-screen indicator",
+        Some("Briefly shows the control and its new value after a hotkey."),
+        toggle_width,
+    );
+    builder.create(
+        w!("BUTTON"),
+        "",
+        Control::OsdToggle.id(),
+        WS_TABSTOP.0 | BS_OWNERDRAW as u32,
+        (
+            builder.control_x(toggle_width),
+            top + (height - builder.px(24)) / 2,
+            toggle_width,
+            builder.px(24),
+        ),
+        FontKind::Body,
+    );
+    builder.card_end();
+}
+
+/// The Action menu's entries, in order; inputs come from the selected monitor.
+fn hotkey_choices(context: &WindowContext) -> Vec<HotkeyAction> {
+    let inputs: Vec<u32> = context
+        .model
+        .controls()
+        .iter()
+        .find(|reading| reading.capability.key == ControlKey::Input)
+        .map(|reading| reading.capability.enum_values.clone())
+        .unwrap_or_default();
+    hotkey_action_choices(context.model.presets(), &inputs)
 }
 
 fn build_safety(builder: &mut Builder<'_>) {
@@ -1692,8 +1852,13 @@ pub(crate) fn draw_item(context: &WindowContext, item: &DRAWITEMSTRUCT) {
             theme.text,
             DT_LEFT,
         );
-    } else if control == Some(Control::ConfirmToggle) {
-        let on = current_settings(context).confirm_input_change;
+    } else if let Some(toggle @ (Control::ConfirmToggle | Control::OsdToggle)) = control {
+        let settings = current_settings(context);
+        let on = if toggle == Control::OsdToggle {
+            settings.show_osd
+        } else {
+            settings.confirm_input_change
+        };
         unsafe {
             FillRect(
                 hdc,
@@ -1817,8 +1982,11 @@ pub(crate) fn handle_command(context: &mut WindowContext, wparam: WPARAM) {
             if page != context.modern.page {
                 context.modern.page = page;
                 context.modern.scroll_y = 0;
-                if page == Page::Presets {
+                if matches!(page, Page::Presets | Page::Hotkeys) {
                     let _ = context.model.refresh_presets();
+                }
+                if page == Page::Hotkeys {
+                    let _ = context.model.refresh_hotkeys();
                 }
                 rebuild(context);
             }
@@ -1838,13 +2006,19 @@ pub(crate) fn handle_command(context: &mut WindowContext, wparam: WPARAM) {
         Control::ValueLabel(_) if clicked => begin_value_edit(context, id),
         Control::InlineEdit if notification == EN_KILLFOCUS => finish_value_edit(context),
         Control::Combo(_) if notification == CBN_SELCHANGE => apply_enum(context, id),
-        Control::ConfirmToggle => {
+        Control::HotkeyRemove(index) if clicked => remove_hotkey(context, index),
+        Control::HotkeyAdd if clicked => add_hotkey(context),
+        Control::ConfirmToggle | Control::OsdToggle => {
             let mut settings = current_settings(context);
-            settings.confirm_input_change = !settings.confirm_input_change;
+            if control == Control::OsdToggle {
+                settings.show_osd = !settings.show_osd;
+            } else {
+                settings.confirm_input_change = !settings.confirm_input_change;
+            }
             queue_settings_save(context, settings);
             if let Some(window) = context.modern.children.iter().find(|window| {
                 let id = unsafe { GetDlgCtrlID(**window) };
-                id == i32::from(Control::ConfirmToggle.id())
+                id == i32::from(control.id())
             }) {
                 unsafe {
                     let _ = InvalidateRect(Some(*window), None, true);
@@ -1853,6 +2027,129 @@ pub(crate) fn handle_command(context: &mut WindowContext, wparam: WPARAM) {
         }
         _ => {}
     }
+}
+
+fn read_child_text(context: &WindowContext, control: Control) -> Option<String> {
+    let window = context
+        .modern
+        .children
+        .iter()
+        .copied()
+        .find(|window| unsafe { GetDlgCtrlID(*window) } == i32::from(control.id()))?;
+    let mut buffer = [0u16; 128];
+    let length = unsafe { GetWindowTextW(window, &mut buffer) }.max(0) as usize;
+    Some(String::from_utf16_lossy(&buffer[..length]))
+}
+
+fn combo_selection(context: &WindowContext, control: Control) -> Option<usize> {
+    let combo = context
+        .modern
+        .children
+        .iter()
+        .copied()
+        .find(|window| unsafe { GetDlgCtrlID(*window) } == i32::from(control.id()))?;
+    usize::try_from(send(combo, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0).ok()
+}
+
+fn add_hotkey(context: &mut WindowContext) {
+    let text = read_child_text(context, Control::HotkeyKeys).unwrap_or_default();
+    if text.trim().is_empty() {
+        set_status(
+            context,
+            "Click the Keys box and press the combination you want to use.",
+        );
+        return;
+    }
+    let keys: KeyCombo = match text.parse() {
+        Ok(keys) => keys,
+        Err(error) => {
+            set_status(context, &error.to_string());
+            return;
+        }
+    };
+    let choices = hotkey_choices(context);
+    let Some(action) = combo_selection(context, Control::HotkeyAction)
+        .and_then(|index| choices.get(index).cloned())
+    else {
+        set_status(context, "Choose what the hotkey does.");
+        return;
+    };
+    let monitor = match (&action, combo_selection(context, Control::HotkeyMonitor)) {
+        (
+            HotkeyAction::ApplyPreset(_) | HotkeyAction::NextPreset | HotkeyAction::PreviousPreset,
+            _,
+        ) => None,
+        (_, Some(index)) if index > 0 => context
+            .model
+            .monitors()
+            .get(index - 1)
+            .map(|monitor| monitor.id.clone()),
+        _ => None,
+    };
+    let replaced = context
+        .model
+        .hotkeys()
+        .iter()
+        .any(|binding| binding.keys == keys);
+    let label = hotkey_action_label(&action);
+    match context.model.save_hotkey(HotkeyBinding {
+        keys,
+        action,
+        monitor,
+    }) {
+        Ok(()) => {
+            crate::hotkeys::register(context);
+            let message = match context.hotkeys.failure(&keys) {
+                Some(reason) => format!("Saved {keys} ({label}), but it is not active: {reason}."),
+                None if replaced => format!("{keys} now does: {label}."),
+                None => format!("Added {keys}: {label}."),
+            };
+            set_status(context, &message);
+            rebuild(context);
+        }
+        Err(error) => set_status(context, &error.to_string()),
+    }
+}
+
+fn remove_hotkey(context: &mut WindowContext, index: usize) {
+    let Some(keys) = context
+        .model
+        .hotkeys()
+        .get(index)
+        .map(|binding| binding.keys)
+    else {
+        return;
+    };
+    match context.model.remove_hotkey(&keys) {
+        Ok(()) => {
+            crate::hotkeys::register(context);
+            set_status(context, &format!("Removed hotkey {keys}."));
+            rebuild(context);
+        }
+        Err(error) => set_status(context, &error.to_string()),
+    }
+}
+
+/// Shows a stepped value at once on the Monitors page (SPEC-WR-1).
+pub(crate) fn show_control_value(context: &mut WindowContext, control: ControlKey) {
+    let Some(ControlValue::Normalized(value)) = context
+        .model
+        .controls()
+        .iter()
+        .find(|reading| reading.capability.key == control)
+        .map(|reading| reading.value)
+    else {
+        return;
+    };
+    if let Some(row) = context.modern.rows.iter().find(|row| row.key == control) {
+        send(row.slider, TBM_SETPOS, WPARAM(1), LPARAM(value as isize));
+        set_window_text(row.value, &format!("{value}%"));
+    }
+}
+
+/// Rebuilds the current page from the model without re-reading monitors.
+pub(crate) fn redraw(context: &mut WindowContext) {
+    rebuild(context);
 }
 
 fn read_preset_name(context: &WindowContext) -> Option<String> {
@@ -2035,6 +2332,9 @@ fn preset_row_action(context: &mut WindowContext, button: RowButton, index: usiz
         RowButton::Up => context.model.move_preset(&name, -1),
         RowButton::Down => context.model.move_preset(&name, 1),
         RowButton::Delete => {
+            if !confirm_preset_delete(context, &name) {
+                return;
+            }
             let result = context.model.delete_preset(&name);
             if result.is_ok() {
                 set_status(context, &format!("Deleted preset '{name}'."));
@@ -2045,6 +2345,31 @@ fn preset_row_action(context: &mut WindowContext, button: RowButton, index: usiz
     match result {
         Ok(()) => rebuild(context),
         Err(error) => set_status(context, &error.to_string()),
+    }
+}
+
+/// Asks before deleting a preset that hotkeys use; they are deleted with it.
+fn confirm_preset_delete(context: &WindowContext, name: &str) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        IDYES, MB_DEFBUTTON2, MB_ICONWARNING, MB_YESNO, MessageBoxW,
+    };
+    let keys = context.model.hotkeys_using_preset(name).unwrap_or_default();
+    if keys.is_empty() {
+        return true;
+    }
+    let list: Vec<String> = keys.iter().map(ToString::to_string).collect();
+    let text = wide_null(&format!(
+        "The preset '{name}' is used by these hotkeys: {}.\n\nDelete the preset and these hotkeys?",
+        list.join(", ")
+    ));
+    let title = wide_null("Delete preset");
+    unsafe {
+        MessageBoxW(
+            Some(context.window),
+            PCWSTR(text.as_ptr()),
+            PCWSTR(title.as_ptr()),
+            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2,
+        ) == IDYES
     }
 }
 
@@ -2319,6 +2644,16 @@ pub(crate) fn on_hscroll(context: &mut WindowContext, slider: HWND) {
         set_window_text(context.modern.revert_value, &format!("{seconds} s"));
         let mut settings = current_settings(context);
         settings.input_revert_seconds = seconds;
+        queue_settings_save(context, settings);
+    } else if let Some(Control::StepSlider(index)) = control {
+        let step = position.clamp(1, 25);
+        set_window_text(context.modern.step_values[index], &format!("{step}%"));
+        let mut settings = current_settings(context);
+        match STEPPABLE_CONTROLS[index] {
+            ControlKey::Brightness => settings.brightness_step = step,
+            ControlKey::Contrast => settings.contrast_step = step,
+            _ => settings.volume_step = step,
+        }
         queue_settings_save(context, settings);
     } else if id == DEBOUNCE_ID {
         let milliseconds = snap_debounce_ms(position);

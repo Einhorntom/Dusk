@@ -5,7 +5,8 @@ use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowA
 use windows::Win32::UI::Controls::DRAWITEMSTRUCT;
 use windows::Win32::UI::Controls::{TBM_SETPOS, TBM_SETRANGE, TBS_AUTOTICKS, TRACKBAR_CLASSW};
 use windows::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
+    NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_WARNING, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+    NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, BM_GETCHECK, BM_SETCHECK, BS_AUTOCHECKBOX, CB_ADDSTRING, CB_GETCURSEL,
@@ -46,7 +47,11 @@ const TRAY_ID: u32 = 1;
 const MENU_SETTINGS: usize = 200;
 const MENU_QUIT: usize = 201;
 
+mod hotkeys;
+mod keys;
 mod modern;
+
+const WM_HOTKEY: u32 = 0x0312;
 
 struct WindowContext {
     model: MonitorSettingsModel,
@@ -63,6 +68,7 @@ struct WindowContext {
     status: HWND,
     window: HWND,
     tray_icon: Option<NOTIFYICONDATAW>,
+    hotkeys: hotkeys::Registrar,
 }
 
 pub fn run(api: Arc<dyn Api>) -> Result<(), String> {
@@ -105,6 +111,7 @@ pub fn run_with_native_ui(api: Arc<dyn Api>, native_ui: bool) -> Result<(), Stri
         status: HWND::default(),
         window: HWND::default(),
         tray_icon: None,
+        hotkeys: hotkeys::Registrar::default(),
     });
     let context_ptr = (&mut *context) as *mut WindowContext;
     let window = unsafe {
@@ -187,6 +194,7 @@ unsafe extern "system" fn window_proc(
             unsafe { PostQuitMessage(1) };
         } else {
             refresh(context);
+            hotkeys::register(context);
         }
         return LRESULT(0);
     }
@@ -205,6 +213,14 @@ unsafe extern "system" fn window_proc(
                 }
                 _ => {}
             }
+        }
+        if message == WM_HOTKEY {
+            hotkeys::on_hotkey(context, wparam.0 as i32);
+            return LRESULT(0);
+        }
+        if message == hotkeys::RECORDING_MESSAGE {
+            hotkeys::on_recording(context, wparam.0 != 0);
+            return LRESULT(0);
         }
         if message == WM_CLOSE {
             unsafe {
@@ -307,6 +323,7 @@ unsafe extern "system" fn window_proc(
     if message == WM_DESTROY {
         if !context_pointer.is_null() {
             let context = unsafe { &mut *context_pointer };
+            context.hotkeys.unregister_all(window);
             if let Some(icon) = context.tray_icon.take() {
                 unsafe {
                     let _ = Shell_NotifyIconW(NIM_DELETE, &icon);
@@ -482,6 +499,35 @@ fn add_tray_icon(context: &mut WindowContext) -> Result<(), String> {
     }
     context.tray_icon = Some(data);
     Ok(())
+}
+
+/// Shows a tray notification, for problems the user must see even while the
+/// Settings window is hidden (SPEC-HK-5).
+fn notify_tray(context: &WindowContext, title: &str, text: &str) {
+    let Some(mut data) = context.tray_icon else {
+        return;
+    };
+    data.uFlags = NIF_INFO;
+    data.dwInfoFlags = NIIF_WARNING;
+    let title: Vec<u16> = title
+        .encode_utf16()
+        .take(data.szInfoTitle.len() - 1)
+        .collect();
+    data.szInfoTitle[..title.len()].copy_from_slice(&title);
+    let text: Vec<u16> = text.encode_utf16().take(data.szInfo.len() - 1).collect();
+    data.szInfo[..text.len()].copy_from_slice(&text);
+    unsafe {
+        let _ = Shell_NotifyIconW(NIM_MODIFY, &data);
+    }
+}
+
+/// Redraws the visible view from the model after a change made elsewhere.
+fn refresh_view(context: &mut WindowContext) {
+    if context.native_ui {
+        update_control_view(context);
+    } else {
+        modern::redraw(context);
+    }
 }
 
 fn show_settings(context: &WindowContext) {
@@ -943,12 +989,11 @@ fn save_settings(context: &mut WindowContext) {
         set_status(context, "Revert timer must be a number.");
         return;
     };
-    let live_preview = context.model.settings().live_preview;
     let settings = AppSettings {
         debounce_ms,
         confirm_input_change,
         input_revert_seconds,
-        live_preview,
+        ..context.model.settings().clone()
     };
     match context.model.update_settings(settings) {
         Ok(()) => set_status(context, "Settings saved."),

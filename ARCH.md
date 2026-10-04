@@ -192,7 +192,8 @@ Two implementations exist: `Engine` (in-process, hosted only by `dispcontrold` a
 | `Clock` | Monotonic time and local wall-clock time. | `bin-*` (system clock), tests (fake) |
 | `Prompter` | Ask for input-change confirmation and the "Keep this input?" revert prompt; returns the decision as an event. | `ui-win32`, CLI (console prompt/`--yes`) |
 | `Notifier` | On-screen indicator, error toasts, tray tooltip/state. | `ui-win32` |
-| `HotkeyRegistrar` | Register bindings and report conflicts. | `ui-win32` |
+| `HotkeyRepository` | Load/save hotkey bindings. | `store-file`, `ddc-fake` |
+| `HotkeyRegistrar` | Register bindings and report conflicts. Implemented directly in `ui-win32` (`hotkeys::Registrar`) rather than as an `app` port: registration is tied to the UI thread's window, and the use case only needs the pressed combination (`run_hotkey`). | `ui-win32` |
 | `AuditStore` | Persist commit counters. | `store-file` |
 | `Autostart` | Enable or disable start with Windows. | `ui-win32` (registry) |
 
@@ -274,7 +275,7 @@ dispcontrol set brightness 40
 ```
 
 ### 8.5 Hotkey
-`WM_HOTKEY` (UI thread, humble) -> `Hotkeys` use case resolves the action -> `adjust`/`apply_preset`/etc. on the engine -> `Notifier` shows the on-screen indicator after the engine publishes the new value.
+`WM_HOTKEY` (UI thread, humble) -> `Api::run_hotkey(keys)` looks up the binding stored for that combination (so preset renames made by the CLI are picked up) and runs it: steps go through `step` -> `adjust` (buffered; a held key continues from the pending target), presets through `apply_preset`/`cycle_preset`, inputs through `set` (with the confirmation/revert policy), power through `set` -> the UI shows the on-screen indicator from the returned `HotkeyOutcome` (`ui-model::text::hotkey_indicator`) and starts the commit timer for steps. Bindings are registered at startup and after every change; registration pauses while the Hotkeys page's key-recording field has focus.
 
 ## 9. Interface adapters and drivers
 
@@ -305,7 +306,7 @@ Presenter and controller for the command line: parses arguments, calls `Api`, re
 - **Split (G11):** `ui-model` holds view models (what to show, formatting, enabled states, input names with aliases, schedule status text) and is fully unit-tested. `ui-win32` is the humble view: it draws the view model and forwards user input as `Api` calls.
 - **Technology:** `windows-rs` calling Win32 directly; **Direct2D + DirectWrite** for drawing; **DWM** for the Windows 11 look (Mica/Acrylic backdrop, rounded corners, immersive dark mode); follows the system theme. No UI framework or WebView.
 - **Windows:** transient tray panel (closes on focus loss and Esc), settings window (lazy, minimize or close hides it, no taskbar button, SPEC-UI-8), on-screen indicator (small layered window), confirmation and "Keep this input?" dialogs. Tray icon handling follows SPEC-UI-9; the app never tries to pin the icon outside the overflow.
-- **Hotkeys:** `RegisterHotKey`; failures are reported through `HotkeyRegistrar`.
+- **Hotkeys:** `RegisterHotKey` on the main window (`MOD_NOREPEAT` except for steps); taken combinations are reported per binding on the Hotkeys page, in the status line and as a tray notification. Key names map to virtual-key codes in `keys.rs`. The on-screen indicator is a layered, click-through, non-activating window (`modern/osd.rs`) drawn with GDI.
 - **Autostart:** per-user registry Run key (`Autostart` port).
 - **Accessibility (SPEC-UI-7):** custom-drawn controls must expose UI Automation providers. **Open:** see risks.
 - `bin-daemon` is a GUI-subsystem executable (no console window).

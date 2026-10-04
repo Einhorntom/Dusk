@@ -4,9 +4,10 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use dispcontrol_app::{BackendError, PresetRepository, SettingsRepository};
+use dispcontrol_app::{BackendError, HotkeyRepository, PresetRepository, SettingsRepository};
 use dispcontrol_domain::{
-    AppSettings, ControlKey, ControlValue, MonitorId, Preset, PresetEntry, validate_preset_name,
+    AppSettings, ControlKey, ControlValue, HotkeyBinding, MonitorId, Preset, PresetEntry,
+    STEP_RANGE, validate_preset_name,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -40,6 +41,23 @@ struct SettingsFile {
     confirm_input_change: bool,
     input_revert_seconds: u32,
     live_preview: bool,
+    // Added in v1 hotkeys; defaults keep older files loading.
+    #[serde(default = "default_step")]
+    brightness_step: u32,
+    #[serde(default = "default_step")]
+    contrast_step: u32,
+    #[serde(default = "default_step")]
+    volume_step: u32,
+    #[serde(default = "default_true")]
+    show_osd: bool,
+}
+
+fn default_step() -> u32 {
+    AppSettings::default().brightness_step
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl From<AppSettings> for SettingsFile {
@@ -50,6 +68,10 @@ impl From<AppSettings> for SettingsFile {
             confirm_input_change: value.confirm_input_change,
             input_revert_seconds: value.input_revert_seconds,
             live_preview: value.live_preview,
+            brightness_step: value.brightness_step,
+            contrast_step: value.contrast_step,
+            volume_step: value.volume_step,
+            show_osd: value.show_osd,
         }
     }
 }
@@ -69,6 +91,10 @@ impl TryFrom<SettingsFile> for AppSettings {
             confirm_input_change: value.confirm_input_change,
             input_revert_seconds: value.input_revert_seconds,
             live_preview: value.live_preview,
+            brightness_step: value.brightness_step,
+            contrast_step: value.contrast_step,
+            volume_step: value.volume_step,
+            show_osd: value.show_osd,
         };
         validate(&settings)?;
         Ok(settings)
@@ -146,12 +172,67 @@ impl TryFrom<PresetFile> for Preset {
     }
 }
 
+/// One `[[hotkeys]]` entry: `keys = "Ctrl+Alt+Up"`, `action = "brightness+"`,
+/// and an optional `monitor`.
+#[derive(Serialize, Deserialize)]
+struct HotkeyFile {
+    keys: String,
+    action: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    monitor: Option<String>,
+}
+
+impl From<&HotkeyBinding> for HotkeyFile {
+    fn from(binding: &HotkeyBinding) -> Self {
+        Self {
+            keys: binding.keys.to_string(),
+            action: binding.action.to_string(),
+            monitor: binding
+                .monitor
+                .as_ref()
+                .map(|monitor| monitor.as_str().to_owned()),
+        }
+    }
+}
+
+impl TryFrom<HotkeyFile> for HotkeyBinding {
+    type Error = BackendError;
+
+    fn try_from(file: HotkeyFile) -> Result<Self, Self::Error> {
+        let fail = |error: dispcontrol_domain::DomainError| {
+            BackendError::Failed(format!("hotkey '{}': {error}", file.keys))
+        };
+        Ok(Self {
+            keys: file.keys.parse().map_err(fail)?,
+            action: file.action.parse().map_err(fail)?,
+            monitor: file
+                .monitor
+                .as_deref()
+                .map(MonitorId::new)
+                .transpose()
+                .map_err(fail)?,
+        })
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct ConfigFile {
     #[serde(flatten)]
     settings: SettingsFile,
     #[serde(default)]
     presets: Vec<PresetFile>,
+    #[serde(default)]
+    hotkeys: Vec<HotkeyFile>,
+}
+
+impl Default for ConfigFile {
+    fn default() -> Self {
+        Self {
+            settings: SettingsFile::from(AppSettings::default()),
+            presets: Vec::new(),
+            hotkeys: Vec::new(),
+        }
+    }
 }
 
 impl FileSettingsRepository {
@@ -181,6 +262,16 @@ impl FileSettingsRepository {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+
+    /// Reads the file (or defaults), applies `change` and writes it back, so
+    /// saving one section keeps the others. An unreadable file is not
+    /// overwritten.
+    fn update(&self, change: impl FnOnce(&mut ConfigFile)) -> Result<(), BackendError> {
+        let _guard = self.lock();
+        let mut file = self.read_file()?.unwrap_or_default();
+        change(&mut file);
+        self.write_file(&file)
+    }
 }
 
 impl SettingsRepository for FileSettingsRepository {
@@ -194,17 +285,7 @@ impl SettingsRepository for FileSettingsRepository {
 
     fn save(&self, settings: &AppSettings) -> Result<(), BackendError> {
         validate(settings)?;
-        let _guard = self.lock();
-        let presets = self
-            .read_file()
-            .ok()
-            .flatten()
-            .map(|file| file.presets)
-            .unwrap_or_default();
-        self.write_file(&ConfigFile {
-            settings: SettingsFile::from(settings.clone()),
-            presets,
-        })
+        self.update(|file| file.settings = SettingsFile::from(settings.clone()))
     }
 }
 
@@ -218,15 +299,7 @@ impl PresetRepository for FileSettingsRepository {
     }
 
     fn save_presets(&self, presets: &[Preset]) -> Result<(), BackendError> {
-        let _guard = self.lock();
-        let settings = match self.read_file()? {
-            Some(file) => file.settings,
-            None => SettingsFile::from(AppSettings::default()),
-        };
-        self.write_file(&ConfigFile {
-            settings,
-            presets: presets.iter().map(PresetFile::from).collect(),
-        })
+        self.update(|file| file.presets = presets.iter().map(PresetFile::from).collect())
     }
 
     fn export_text(&self, presets: &[Preset]) -> Result<String, BackendError> {
@@ -253,6 +326,24 @@ impl PresetRepository for FileSettingsRepository {
 
     fn location(&self) -> String {
         self.path.display().to_string()
+    }
+}
+
+impl HotkeyRepository for FileSettingsRepository {
+    fn load_hotkeys(&self) -> Result<Vec<HotkeyBinding>, BackendError> {
+        let _guard = self.lock();
+        match self.read_file()? {
+            Some(file) => file
+                .hotkeys
+                .into_iter()
+                .map(HotkeyBinding::try_from)
+                .collect(),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn save_hotkeys(&self, hotkeys: &[HotkeyBinding]) -> Result<(), BackendError> {
+        self.update(|file| file.hotkeys = hotkeys.iter().map(HotkeyFile::from).collect())
     }
 }
 
@@ -286,6 +377,18 @@ fn validate(settings: &AppSettings) -> Result<(), BackendError> {
     if settings.input_revert_seconds != 0 && !(5..=60).contains(&settings.input_revert_seconds) {
         return Err(BackendError::Failed(
             "input revert must be 0 or between 5 and 60 seconds".into(),
+        ));
+    }
+    if [
+        settings.brightness_step,
+        settings.contrast_step,
+        settings.volume_step,
+    ]
+    .iter()
+    .any(|step| !STEP_RANGE.contains(step))
+    {
+        return Err(BackendError::Failed(
+            "hotkey steps must be between 1 and 25 percent".into(),
         ));
     }
     Ok(())
@@ -418,6 +521,71 @@ mod tests {
         repository.save_presets(&[]).unwrap();
         assert_eq!(repository.load().unwrap(), settings);
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn hotkeys_round_trip_and_every_section_survives_the_others_saves() {
+        let directory = std::env::temp_dir().join(format!(
+            "dispcontrol-hotkeys-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = directory.join("config.toml");
+        let repository = FileSettingsRepository::new(&path);
+        let hotkeys = vec![
+            HotkeyBinding {
+                keys: "Ctrl+Alt+Up".parse().unwrap(),
+                action: "brightness+".parse().unwrap(),
+                monitor: None,
+            },
+            HotkeyBinding {
+                keys: "F9".parse().unwrap(),
+                action: "preset:Night mode".parse().unwrap(),
+                monitor: Some(MonitorId::new("L32p-30#0").unwrap()),
+            },
+        ];
+        repository.save_hotkeys(&hotkeys).unwrap();
+        let settings = AppSettings {
+            volume_step: 2,
+            show_osd: false,
+            ..AppSettings::default()
+        };
+        repository.save(&settings).unwrap();
+        repository.save_presets(&[]).unwrap();
+
+        assert_eq!(repository.load_hotkeys().unwrap(), hotkeys);
+        assert_eq!(repository.load().unwrap(), settings);
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("keys = \"Ctrl+Alt+Up\""));
+        assert!(text.contains("action = \"preset:Night mode\""));
+        repository.save_hotkeys(&[]).unwrap();
+        assert_eq!(repository.load().unwrap(), settings);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn older_files_load_with_default_hotkey_settings_and_bad_hotkeys_are_rejected() {
+        let old = "version = 1\ndebounce_ms = 600\nconfirm_input_change = true\ninput_revert_seconds = 15\nlive_preview = false\n";
+        let file: ConfigFile = toml::from_str(old).unwrap();
+        let settings = AppSettings::try_from(file.settings).unwrap();
+        assert_eq!(settings.brightness_step, 5);
+        assert!(settings.show_osd);
+        assert!(file.hotkeys.is_empty());
+
+        for (keys, action) in [("Up", "brightness+"), ("Ctrl+Up", "sharpness+")] {
+            let entry = HotkeyFile {
+                keys: keys.into(),
+                action: action.into(),
+                monitor: None,
+            };
+            assert!(HotkeyBinding::try_from(entry).is_err());
+        }
+        let steps = format!("{old}volume_step = 40\n");
+        let file: ConfigFile = toml::from_str(&steps).unwrap();
+        assert!(AppSettings::try_from(file.settings).is_err());
     }
 
     #[test]

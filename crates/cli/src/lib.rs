@@ -191,15 +191,19 @@ fn file_command(
 
 fn preset_request(args: &[String], json_output: bool) -> Result<Value, CliError> {
     let mut include_input = false;
+    let mut force = false;
     let positional: Vec<&String> = args
         .iter()
-        .filter(|argument| {
-            if argument.as_str() == "--include-input" {
+        .filter(|argument| match argument.as_str() {
+            "--include-input" => {
                 include_input = true;
                 false
-            } else {
-                true
             }
+            "--force" => {
+                force = true;
+                false
+            }
+            _ => true,
         })
         .collect();
     let request = match positional.as_slice() {
@@ -209,7 +213,7 @@ fn preset_request(args: &[String], json_output: bool) -> Result<Value, CliError>
         [command, verb, name] if command.as_str() == "preset" => match verb.as_str() {
             "apply" => json!({ "op": "preset_apply", "name": name }),
             "save" => json!({ "op": "preset_save", "name": name, "include_input": include_input }),
-            "delete" => json!({ "op": "preset_delete", "name": name }),
+            "delete" => json!({ "op": "preset_delete", "name": name, "force": force }),
             _ => return Err(usage_error("invalid command or arguments", json_output)),
         },
         [command, verb, name, other] if command.as_str() == "preset" => match verb.as_str() {
@@ -289,7 +293,7 @@ fn usage_error(message: &str, json_output: bool) -> CliError {
             "{message}\nUsage: dispcontrol [--json] list | get <monitor-id> <control> | \
              set <monitor-id> <control> <value> | settings show | preset list | \
              preset apply <name> | preset next | preset prev | \
-             preset save <name> [monitor-id] [--include-input] | preset delete <name> | \
+             preset save <name> [monitor-id] [--include-input] | preset delete <name> [--force] | \
              preset rename <name> <new-name> | preset move <name> <offset> | \
              preset set <name> <monitor-id> <control> <value> | \
              preset unset <name> <monitor-id> <control> | preset path | \

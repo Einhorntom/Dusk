@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 pub mod text;
 
-use dispcontrol_app::{Api, ApplyReport, ImportSummary, UseCaseError};
+use dispcontrol_app::{Api, ApplyReport, HotkeyOutcome, ImportSummary, UseCaseError};
 use dispcontrol_domain::{
-    AppSettings, ControlKey, ControlReading, ControlValue, Monitor, MonitorId, Preset, PresetEntry,
+    AppSettings, ControlKey, ControlReading, ControlValue, HotkeyBinding, KeyCombo, Monitor,
+    MonitorId, Preset, PresetEntry,
 };
 
 const CONTROLS: [ControlKey; 9] = [
@@ -30,6 +31,7 @@ pub struct MonitorSettingsModel {
     settings: AppSettings,
     presets: Vec<Preset>,
     matching_preset: Option<String>,
+    hotkeys: Vec<HotkeyBinding>,
     last_error: Option<String>,
 }
 
@@ -44,6 +46,7 @@ impl MonitorSettingsModel {
             settings: AppSettings::default(),
             presets: Vec::new(),
             matching_preset: None,
+            hotkeys: Vec::new(),
             last_error: None,
         }
     }
@@ -158,14 +161,18 @@ impl MonitorSettingsModel {
         Ok(preset)
     }
 
+    /// Also removes hotkeys that apply the preset; ask first if
+    /// `hotkeys_using_preset` is not empty (SPEC-PRE-5).
     pub fn delete_preset(&mut self, name: &str) -> Result<(), UseCaseError> {
         self.api.delete_preset(name)?;
-        self.refresh_presets()
+        self.refresh_presets()?;
+        self.refresh_hotkeys()
     }
 
     pub fn rename_preset(&mut self, name: &str, new_name: &str) -> Result<(), UseCaseError> {
         self.api.rename_preset(name, new_name)?;
-        self.refresh_presets()
+        self.refresh_presets()?;
+        self.refresh_hotkeys()
     }
 
     pub fn move_preset(&mut self, name: &str, offset: i32) -> Result<(), UseCaseError> {
@@ -204,6 +211,56 @@ impl MonitorSettingsModel {
 
     pub fn presets_location(&self) -> String {
         self.api.presets_location()
+    }
+
+    pub fn refresh_hotkeys(&mut self) -> Result<(), UseCaseError> {
+        self.hotkeys = self.api.list_hotkeys()?;
+        Ok(())
+    }
+
+    pub fn hotkeys(&self) -> &[HotkeyBinding] {
+        &self.hotkeys
+    }
+
+    pub fn save_hotkey(&mut self, binding: HotkeyBinding) -> Result<(), UseCaseError> {
+        self.api.save_hotkey(binding)?;
+        self.refresh_hotkeys()
+    }
+
+    pub fn remove_hotkey(&mut self, keys: &KeyCombo) -> Result<(), UseCaseError> {
+        self.api.remove_hotkey(keys)?;
+        self.refresh_hotkeys()
+    }
+
+    pub fn hotkeys_using_preset(&self, name: &str) -> Result<Vec<KeyCombo>, UseCaseError> {
+        self.api.hotkeys_using_preset(name)
+    }
+
+    /// Runs a pressed hotkey and updates the shown values: a step updates
+    /// the selected monitor's value at once (SPEC-WR-1); other actions
+    /// re-read the controls.
+    pub fn run_hotkey(&mut self, keys: &KeyCombo) -> Result<HotkeyOutcome, UseCaseError> {
+        let outcome = self.api.run_hotkey(keys)?;
+        match &outcome {
+            HotkeyOutcome::Stepped { control, values } => {
+                let selected = values
+                    .iter()
+                    .find(|(monitor, _)| Some(monitor) == self.selected_monitor.as_ref());
+                if let Some((_, value)) = selected
+                    && let Some(reading) = self
+                        .available_controls
+                        .iter_mut()
+                        .find(|reading| reading.capability.key == *control)
+                {
+                    reading.value = ControlValue::Normalized(*value);
+                }
+            }
+            // A monitor that was just switched off or away may not answer.
+            _ => {
+                let _ = self.after_preset_change();
+            }
+        }
+        Ok(outcome)
     }
 
     fn after_preset_change(&mut self) -> Result<(), UseCaseError> {

@@ -3,8 +3,10 @@
 
 use std::path::{Path, PathBuf};
 
-use dispcontrol_app::{ApplyReport, EntryStatus, ImportSummary};
-use dispcontrol_domain::{ControlKey, ControlValue, Preset, PresetEntry};
+use dispcontrol_app::{ApplyReport, EntryStatus, HotkeyOutcome, ImportSummary};
+use dispcontrol_domain::{
+    ControlKey, ControlValue, HotkeyAction, HotkeyBinding, Preset, PresetEntry, STEPPABLE_CONTROLS,
+};
 
 /// File name used by the Settings Export/Import buttons, next to the config file.
 pub const PRESET_EXCHANGE_FILE: &str = "dispcontrol-presets.toml";
@@ -156,6 +158,98 @@ pub fn exchange_path(location: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(PRESET_EXCHANGE_FILE))
 }
 
+/// What a hotkey does, as shown in the Hotkeys list and its Action menu.
+pub fn hotkey_action_label(action: &HotkeyAction) -> String {
+    match action {
+        HotkeyAction::ApplyPreset(name) => format!("Apply preset \u{201C}{name}\u{201D}"),
+        HotkeyAction::NextPreset => "Next preset".into(),
+        HotkeyAction::PreviousPreset => "Previous preset".into(),
+        HotkeyAction::Step { control, up } => format!(
+            "{} {}",
+            control_title(*control),
+            if *up { "up" } else { "down" }
+        ),
+        HotkeyAction::SetInput(value) => {
+            format!("Switch input to {}", enum_label(ControlKey::Input, *value))
+        }
+        HotkeyAction::TogglePower => "Turn display off or on".into(),
+    }
+}
+
+/// Secondary line for a configured hotkey: action, target and, when the
+/// combination could not be registered, why (SPEC-HK-5).
+pub fn hotkey_description(binding: &HotkeyBinding, failure: Option<&str>) -> String {
+    let mut text = hotkey_action_label(&binding.action);
+    let per_monitor = !matches!(
+        binding.action,
+        HotkeyAction::ApplyPreset(_) | HotkeyAction::NextPreset | HotkeyAction::PreviousPreset
+    );
+    match &binding.monitor {
+        Some(monitor) if per_monitor => text.push_str(&format!(" on {monitor}")),
+        None if per_monitor => text.push_str(" on all monitors"),
+        _ => {}
+    }
+    if let Some(reason) = failure {
+        text.push_str(&format!(" \u{2014} not active: {reason}"));
+    }
+    text
+}
+
+/// The actions offered when adding a hotkey: steps, preset cycling, each
+/// preset, each input the selected monitor offers, and power.
+pub fn hotkey_action_choices(presets: &[Preset], inputs: &[u32]) -> Vec<HotkeyAction> {
+    let mut choices = Vec::new();
+    for control in STEPPABLE_CONTROLS {
+        choices.push(HotkeyAction::Step { control, up: true });
+        choices.push(HotkeyAction::Step { control, up: false });
+    }
+    choices.push(HotkeyAction::NextPreset);
+    choices.push(HotkeyAction::PreviousPreset);
+    choices.extend(
+        presets
+            .iter()
+            .map(|preset| HotkeyAction::ApplyPreset(preset.name.clone())),
+    );
+    choices.extend(inputs.iter().map(|value| HotkeyAction::SetInput(*value)));
+    choices.push(HotkeyAction::TogglePower);
+    choices
+}
+
+/// Content of the on-screen indicator.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Indicator {
+    pub title: String,
+    pub value: String,
+    /// Percent level for a bar, for stepped controls.
+    pub level: Option<u32>,
+}
+
+/// What the on-screen indicator shows after a hotkey (SPEC-HK-6). Input
+/// changes show none: their confirmation dialogs are the feedback.
+pub fn hotkey_indicator(outcome: &HotkeyOutcome) -> Option<Indicator> {
+    match outcome {
+        HotkeyOutcome::Stepped { control, values } => values.first().map(|(_, value)| Indicator {
+            title: control_title(*control).to_owned(),
+            value: format!("{value}%"),
+            level: Some(*value),
+        }),
+        HotkeyOutcome::Preset(report) => Some(Indicator {
+            title: "Preset".into(),
+            value: match report.failed() {
+                0 => report.preset.clone(),
+                failed => format!("{} ({failed} failed)", report.preset),
+            },
+            level: None,
+        }),
+        HotkeyOutcome::Input { .. } => None,
+        HotkeyOutcome::Power { on, .. } => Some(Indicator {
+            title: "Display".into(),
+            value: if *on { "On" } else { "Off" }.into(),
+            level: None,
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +368,114 @@ mod tests {
             apply_report_message(&report),
             "Applied 'Night': 1 changed, 0 already set, 1 skipped, 1 failed. \
              First failure: DDC/CI error"
+        );
+    }
+
+    fn action(text: &str) -> HotkeyAction {
+        text.parse().unwrap()
+    }
+
+    #[test]
+    fn hotkey_labels_describe_action_target_and_registration() {
+        assert_eq!(hotkey_action_label(&action("brightness+")), "Brightness up");
+        assert_eq!(
+            hotkey_action_label(&action("input:0x11")),
+            "Switch input to HDMI 1 (raw-0x11)"
+        );
+        let binding = HotkeyBinding {
+            keys: "Ctrl+Alt+Up".parse().unwrap(),
+            action: action("volume-"),
+            monitor: None,
+        };
+        assert_eq!(
+            hotkey_description(&binding, None),
+            "Volume down on all monitors"
+        );
+        let targeted = HotkeyBinding {
+            monitor: Some(dispcontrol_domain::MonitorId::new("L32p-30#0").unwrap()),
+            ..binding.clone()
+        };
+        assert_eq!(
+            hotkey_description(&targeted, Some("used by another app")),
+            "Volume down on L32p-30#0 \u{2014} not active: used by another app"
+        );
+        let preset = HotkeyBinding {
+            action: action("preset:Night"),
+            ..targeted
+        };
+        assert_eq!(
+            hotkey_description(&preset, None),
+            "Apply preset \u{201C}Night\u{201D}"
+        );
+    }
+
+    #[test]
+    fn action_choices_list_steps_presets_inputs_and_power() {
+        let presets = vec![Preset {
+            name: "Night".into(),
+            entries: vec![],
+        }];
+        let choices = hotkey_action_choices(&presets, &[0x0F, 0x31]);
+        let texts: Vec<String> = choices.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "brightness+",
+                "brightness-",
+                "contrast+",
+                "contrast-",
+                "volume+",
+                "volume-",
+                "preset-next",
+                "preset-prev",
+                "preset:Night",
+                "input:0x0F",
+                "input:0x31",
+                "power-toggle",
+            ]
+        );
+    }
+
+    #[test]
+    fn indicators_show_steps_presets_and_power_but_not_inputs() {
+        let monitor = dispcontrol_domain::MonitorId::new("m").unwrap();
+        let step = HotkeyOutcome::Stepped {
+            control: ControlKey::Contrast,
+            values: vec![(monitor, 35)],
+        };
+        assert_eq!(
+            hotkey_indicator(&step),
+            Some(Indicator {
+                title: "Contrast".into(),
+                value: "35%".into(),
+                level: Some(35),
+            })
+        );
+        let report = ApplyReport {
+            preset: "Night".into(),
+            outcomes: vec![],
+        };
+        assert_eq!(
+            hotkey_indicator(&HotkeyOutcome::Preset(report))
+                .unwrap()
+                .value,
+            "Night"
+        );
+        assert_eq!(
+            hotkey_indicator(&HotkeyOutcome::Power {
+                on: false,
+                changed: 1
+            })
+            .unwrap()
+            .value,
+            "Off"
+        );
+        assert_eq!(
+            hotkey_indicator(&HotkeyOutcome::Input {
+                value: 0x11,
+                changed: 1
+            }),
+            None
         );
     }
 

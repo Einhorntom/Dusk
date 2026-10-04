@@ -4,9 +4,10 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use dispcontrol_app::{
-    BackendError, Clock, InputChangePrompter, PresetRepository, SettingsRepository,
+    BackendError, Clock, HotkeyRepository, InputChangePrompter, PresetRepository,
+    SettingsRepository,
 };
-use dispcontrol_domain::{AppSettings, Monitor, Preset};
+use dispcontrol_domain::{AppSettings, HotkeyBinding, Monitor, Preset};
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
@@ -95,6 +96,30 @@ impl PresetRepository for MemoryPresets {
 
     fn location(&self) -> String {
         "memory://presets".into()
+    }
+}
+
+#[derive(Default)]
+pub struct MemoryHotkeys(Mutex<Vec<HotkeyBinding>>);
+
+impl MemoryHotkeys {
+    pub fn stored(&self) -> Vec<HotkeyBinding> {
+        lock(&self.0).clone()
+    }
+
+    pub fn replace(&self, hotkeys: Vec<HotkeyBinding>) {
+        *lock(&self.0) = hotkeys;
+    }
+}
+
+impl HotkeyRepository for MemoryHotkeys {
+    fn load_hotkeys(&self) -> Result<Vec<HotkeyBinding>, BackendError> {
+        Ok(self.stored())
+    }
+
+    fn save_hotkeys(&self, hotkeys: &[HotkeyBinding]) -> Result<(), BackendError> {
+        self.replace(hotkeys.to_vec());
+        Ok(())
     }
 }
 

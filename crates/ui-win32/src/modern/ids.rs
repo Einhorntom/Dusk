@@ -33,6 +33,14 @@ const PRESET_BACK: u16 = 3001;
 const PRESET_EXPORT: u16 = 3002;
 const PRESET_IMPORT: u16 = 3003;
 const PRESET_FOLDER: u16 = 3004;
+const HOTKEY_REMOVE_BASE: u16 = 3100;
+const HOTKEY_KEYS: u16 = 3201;
+const HOTKEY_ACTION: u16 = 3202;
+const HOTKEY_MONITOR: u16 = 3203;
+const HOTKEY_ADD: u16 = 3204;
+const OSD_TOGGLE: u16 = 3205;
+const STEP_SLIDER_BASE: u16 = 3300;
+const STEP_VALUE_BASE: u16 = 3400;
 /// The debounce slider reuses the shared `DEBOUNCE_ID`; its label sits 100 above.
 const DEBOUNCE_VALUE_OFFSET: u16 = 100;
 
@@ -95,9 +103,18 @@ pub(crate) enum Control {
     PresetExport,
     PresetImport,
     PresetFolder,
+    HotkeyRemove(usize),
+    HotkeyKeys,
+    HotkeyAction,
+    HotkeyMonitor,
+    HotkeyAdd,
+    OsdToggle,
+    /// Hotkey step size for `STEPPABLE_CONTROLS[index]`.
+    StepSlider(usize),
+    StepValue(usize),
 }
 
-const FIXED: [(Control, u16); 12] = [
+const FIXED: [(Control, u16); 17] = [
     (Control::RevertSlider, REVERT_SLIDER),
     (Control::RevertValue, REVERT_VALUE),
     (
@@ -113,6 +130,11 @@ const FIXED: [(Control, u16); 12] = [
     (Control::PresetExport, PRESET_EXPORT),
     (Control::PresetImport, PRESET_IMPORT),
     (Control::PresetFolder, PRESET_FOLDER),
+    (Control::HotkeyKeys, HOTKEY_KEYS),
+    (Control::HotkeyAction, HOTKEY_ACTION),
+    (Control::HotkeyMonitor, HOTKEY_MONITOR),
+    (Control::HotkeyAdd, HOTKEY_ADD),
+    (Control::OsdToggle, OSD_TOGGLE),
 ];
 
 /// Builds the control for row `index` of an ID block.
@@ -134,6 +156,9 @@ impl Control {
             Self::EntryValue(index) => block(ENTRY_VALUE_BASE, index),
             Self::Entry(EntryButton::Set, index) => block(ENTRY_SET_BASE, index),
             Self::Entry(EntryButton::Remove, index) => block(ENTRY_REMOVE_BASE, index),
+            Self::HotkeyRemove(index) => block(HOTKEY_REMOVE_BASE, index),
+            Self::StepSlider(index) => block(STEP_SLIDER_BASE, index),
+            Self::StepValue(index) => block(STEP_VALUE_BASE, index),
             fixed => {
                 FIXED
                     .iter()
@@ -153,7 +178,7 @@ impl Control {
                 .contains(&id)
                 .then(|| usize::from(id - base))
         };
-        let blocks: [(u16, MakeControl); 7] = [
+        let blocks: [(u16, MakeControl); 10] = [
             (NAV_BASE, Control::Nav),
             (SLIDER_BASE, Control::Slider),
             (VALUE_LABEL_BASE, Control::ValueLabel),
@@ -165,6 +190,9 @@ impl Control {
             (ENTRY_REMOVE_BASE, |index| {
                 Control::Entry(EntryButton::Remove, index)
             }),
+            (HOTKEY_REMOVE_BASE, Control::HotkeyRemove),
+            (STEP_SLIDER_BASE, Control::StepSlider),
+            (STEP_VALUE_BASE, Control::StepValue),
         ];
         for (base, make) in blocks {
             if let Some(index) = row(base) {
@@ -193,6 +221,9 @@ mod tests {
                 Control::EntryValue(index),
                 Control::Entry(EntryButton::Set, index),
                 Control::Entry(EntryButton::Remove, index),
+                Control::HotkeyRemove(index),
+                Control::StepSlider(index),
+                Control::StepValue(index),
             ]);
             all.extend(
                 RowButton::ALL

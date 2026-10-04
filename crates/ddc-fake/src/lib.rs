@@ -4,7 +4,7 @@
 //! `FakeBackend` behaves like the Windows DDC/CI backend at the port level:
 //! unknown monitors are `NotFound`, unsupported controls read as `None`, and
 //! every accepted write is recorded. The `ports` module holds in-memory
-//! settings/preset stores, a scripted input prompter and a manual clock, and
+//! settings/preset/hotkey stores, a scripted input prompter and a manual clock, and
 //! `Harness` wires them into a `MonitorService`.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -15,7 +15,7 @@ use dispcontrol_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
 
 pub mod ports;
 
-pub use ports::{ManualClock, MemoryPresets, MemorySettings, ScriptedPrompter};
+pub use ports::{ManualClock, MemoryHotkeys, MemoryPresets, MemorySettings, ScriptedPrompter};
 
 /// A simulated display: its identity plus the controls it reports.
 #[derive(Clone, Debug)]
@@ -274,6 +274,7 @@ pub struct Harness {
     pub clock: Arc<ManualClock>,
     pub settings: Arc<MemorySettings>,
     pub presets: Arc<MemoryPresets>,
+    pub hotkeys: Arc<MemoryHotkeys>,
     pub prompter: Arc<ScriptedPrompter>,
 }
 
@@ -289,11 +290,13 @@ impl Harness {
         let clock = Arc::new(ManualClock::new());
         let settings = Arc::new(MemorySettings::default());
         let presets = Arc::new(MemoryPresets::default());
+        let hotkeys = Arc::new(MemoryHotkeys::default());
         let prompter = Arc::new(prompter);
         let service = Arc::new(MonitorService::new(
             backend.clone(),
             settings.clone(),
             presets.clone(),
+            hotkeys.clone(),
             prompter.clone(),
             clock.clone(),
         ));
@@ -303,6 +306,7 @@ impl Harness {
             clock,
             settings,
             presets,
+            hotkeys,
             prompter,
         }
     }

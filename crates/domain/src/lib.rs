@@ -2,6 +2,10 @@
 
 use std::fmt;
 
+mod hotkey;
+
+pub use hotkey::{HotkeyAction, HotkeyBinding, Key, KeyCombo, STEPPABLE_CONTROLS};
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct MonitorId(String);
 
@@ -257,6 +261,27 @@ pub struct AppSettings {
     pub confirm_input_change: bool,
     pub input_revert_seconds: u32,
     pub live_preview: bool,
+    /// Percent per `brightness+`/`-` hotkey press (SPEC-HK-3).
+    pub brightness_step: u32,
+    pub contrast_step: u32,
+    pub volume_step: u32,
+    /// Show the on-screen indicator after a hotkey (SPEC-HK-6).
+    pub show_osd: bool,
+}
+
+/// Allowed hotkey step sizes, in percent.
+pub const STEP_RANGE: std::ops::RangeInclusive<u32> = 1..=25;
+
+impl AppSettings {
+    /// Step size for a steppable control, or `None` for other controls.
+    pub fn step_for(&self, control: ControlKey) -> Option<u32> {
+        match control {
+            ControlKey::Brightness => Some(self.brightness_step),
+            ControlKey::Contrast => Some(self.contrast_step),
+            ControlKey::Volume => Some(self.volume_step),
+            _ => None,
+        }
+    }
 }
 
 impl Default for AppSettings {
@@ -266,6 +291,10 @@ impl Default for AppSettings {
             confirm_input_change: true,
             input_revert_seconds: 10,
             live_preview: false,
+            brightness_step: 5,
+            contrast_step: 5,
+            volume_step: 5,
+            show_osd: true,
         }
     }
 }
@@ -280,6 +309,7 @@ pub enum DomainError {
     InvalidEnumCapability(ControlKey),
     EnumValueUnavailable { control: ControlKey, value: u32 },
     InvalidPresetName,
+    InvalidHotkey(String),
 }
 
 impl fmt::Display for DomainError {
@@ -305,6 +335,7 @@ impl fmt::Display for DomainError {
             Self::InvalidPresetName => {
                 f.write_str("preset name must be between 1 and 40 characters")
             }
+            Self::InvalidHotkey(message) => f.write_str(message),
         }
     }
 }

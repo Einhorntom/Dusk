@@ -7,9 +7,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use dispcontrol_domain::{
-    AppSettings, ControlCapability, ControlKey, ControlReading, ControlValue, DomainError, Monitor,
-    MonitorId, Preset, PresetEntry, preset_names_equal, validate_preset_name,
+    AppSettings, ControlCapability, ControlKey, ControlReading, ControlValue, DomainError,
+    HotkeyBinding, KeyCombo, Monitor, MonitorId, Preset, PresetEntry, STEP_RANGE,
+    preset_names_equal, validate_preset_name,
 };
+
+mod hotkeys;
+
+pub use hotkeys::{HotkeyOutcome, HotkeyRepository};
 
 pub trait PresetRepository: Send + Sync {
     fn load_presets(&self) -> Result<Vec<Preset>, BackendError>;
@@ -179,6 +184,11 @@ pub trait Api: Send + Sync {
     fn export_presets(&self) -> Result<String, UseCaseError>;
     fn import_presets(&self, text: &str, replace: bool) -> Result<ImportSummary, UseCaseError>;
     fn presets_location(&self) -> String;
+    fn list_hotkeys(&self) -> Result<Vec<HotkeyBinding>, UseCaseError>;
+    fn save_hotkey(&self, binding: HotkeyBinding) -> Result<(), UseCaseError>;
+    fn remove_hotkey(&self, keys: &KeyCombo) -> Result<(), UseCaseError>;
+    fn hotkeys_using_preset(&self, name: &str) -> Result<Vec<KeyCombo>, UseCaseError>;
+    fn run_hotkey(&self, keys: &KeyCombo) -> Result<HotkeyOutcome, UseCaseError>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -211,6 +221,7 @@ pub enum UseCaseError {
     SettingsInvalid(&'static str),
     PresetNotFound(String),
     PresetExists(String),
+    HotkeyNotFound(String),
 }
 
 impl fmt::Display for UseCaseError {
@@ -229,6 +240,7 @@ impl fmt::Display for UseCaseError {
             Self::SettingsInvalid(message) => f.write_str(message),
             Self::PresetNotFound(name) => write!(f, "preset not found: {name}"),
             Self::PresetExists(name) => write!(f, "a preset named {name} already exists"),
+            Self::HotkeyNotFound(keys) => write!(f, "no hotkey is bound to {keys}"),
         }
     }
 }
@@ -251,6 +263,7 @@ pub struct MonitorService {
     backend: Arc<dyn MonitorBackend>,
     settings: Arc<dyn SettingsRepository>,
     presets: Arc<dyn PresetRepository>,
+    hotkeys: Arc<dyn HotkeyRepository>,
     input_prompter: Arc<dyn InputChangePrompter>,
     clock: Arc<dyn Clock>,
     write_history: Mutex<HashMap<(MonitorId, ControlKey), VecDeque<Instant>>>,
@@ -270,6 +283,7 @@ impl MonitorService {
         backend: Arc<dyn MonitorBackend>,
         settings: Arc<dyn SettingsRepository>,
         presets: Arc<dyn PresetRepository>,
+        hotkeys: Arc<dyn HotkeyRepository>,
         input_prompter: Arc<dyn InputChangePrompter>,
         clock: Arc<dyn Clock>,
     ) -> Self {
@@ -277,6 +291,7 @@ impl MonitorService {
             backend,
             settings,
             presets,
+            hotkeys,
             input_prompter,
             clock,
             write_history: Mutex::new(HashMap::new()),
@@ -585,6 +600,18 @@ impl MonitorService {
                 "input revert must be 0 or between 5 and 60 seconds",
             ));
         }
+        if [
+            settings.brightness_step,
+            settings.contrast_step,
+            settings.volume_step,
+        ]
+        .iter()
+        .any(|step| !STEP_RANGE.contains(step))
+        {
+            return Err(UseCaseError::SettingsInvalid(
+                "hotkey steps must be between 1 and 25 percent",
+            ));
+        }
         self.settings.save(&settings)?;
         Ok(())
     }
@@ -655,7 +682,7 @@ impl MonitorService {
             return Err(UseCaseError::PresetNotFound(name.to_owned()));
         }
         self.presets.save_presets(&presets)?;
-        Ok(())
+        self.remove_preset_from_hotkeys(name)
     }
 
     pub fn rename_preset(&self, name: &str, new_name: &str) -> Result<(), UseCaseError> {
@@ -672,9 +699,9 @@ impl MonitorService {
         {
             return Err(UseCaseError::PresetExists(new_name));
         }
-        presets[index].name = new_name;
+        let old_name = std::mem::replace(&mut presets[index].name, new_name.clone());
         self.presets.save_presets(&presets)?;
-        Ok(())
+        self.rename_preset_in_hotkeys(&old_name, &new_name)
     }
 
     pub fn move_preset(&self, name: &str, offset: i32) -> Result<(), UseCaseError> {
@@ -1044,5 +1071,25 @@ impl Api for MonitorService {
 
     fn presets_location(&self) -> String {
         MonitorService::presets_location(self)
+    }
+
+    fn list_hotkeys(&self) -> Result<Vec<HotkeyBinding>, UseCaseError> {
+        MonitorService::list_hotkeys(self)
+    }
+
+    fn save_hotkey(&self, binding: HotkeyBinding) -> Result<(), UseCaseError> {
+        MonitorService::save_hotkey(self, binding)
+    }
+
+    fn remove_hotkey(&self, keys: &KeyCombo) -> Result<(), UseCaseError> {
+        MonitorService::remove_hotkey(self, keys)
+    }
+
+    fn hotkeys_using_preset(&self, name: &str) -> Result<Vec<KeyCombo>, UseCaseError> {
+        MonitorService::hotkeys_using_preset(self, name)
+    }
+
+    fn run_hotkey(&self, keys: &KeyCombo) -> Result<HotkeyOutcome, UseCaseError> {
+        MonitorService::run_hotkey(self, keys)
     }
 }

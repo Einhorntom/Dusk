@@ -168,3 +168,56 @@ fn settings_updates_are_stored_and_kept_in_the_model() {
     assert!(model.update_settings(settings).is_err());
     assert_eq!(model.settings().debounce_ms, 400);
 }
+
+fn binding(keys: &str, action: &str) -> dispcontrol_domain::HotkeyBinding {
+    dispcontrol_domain::HotkeyBinding {
+        keys: keys.parse().unwrap(),
+        action: action.parse().unwrap(),
+        monitor: None,
+    }
+}
+
+#[test]
+fn a_step_hotkey_shows_the_new_target_before_it_is_written() {
+    let (mut model, h) = model_with(vec![FakeMonitor::reference("m")]);
+    model
+        .save_hotkey(binding("Ctrl+Alt+Up", "brightness+"))
+        .unwrap();
+    assert_eq!(model.hotkeys().len(), 1);
+    let keys = model.hotkeys()[0].keys;
+    model.run_hotkey(&keys).unwrap();
+    model.run_hotkey(&keys).unwrap();
+    assert_eq!(
+        shown_value(&model, ControlKey::Brightness),
+        Some(ControlValue::Normalized(60))
+    );
+    assert!(h.backend.writes().is_empty());
+}
+
+#[test]
+fn preset_hotkeys_refresh_values_and_follow_renames_and_deletes() {
+    let (mut model, h) = model_with(vec![FakeMonitor::reference("m")]);
+    let id = MonitorId::new("m").unwrap();
+    model.save_current_as_preset("Day", false).unwrap();
+    model
+        .save_hotkey(binding("Ctrl+Alt+D", "preset:Day"))
+        .unwrap();
+    h.backend.set_value(&id, ControlKey::Contrast, 5);
+
+    model.run_hotkey(&model.hotkeys()[0].keys.clone()).unwrap();
+    assert_eq!(
+        shown_value(&model, ControlKey::Contrast),
+        Some(ControlValue::Normalized(50))
+    );
+
+    model.rename_preset("Day", "Sunny").unwrap();
+    assert_eq!(model.hotkeys()[0].action.to_string(), "preset:Sunny");
+    assert_eq!(model.hotkeys_using_preset("sunny").unwrap().len(), 1);
+    model.delete_preset("Sunny").unwrap();
+    assert!(model.hotkeys().is_empty());
+
+    model.save_hotkey(binding("Ctrl+Alt+V", "volume+")).unwrap();
+    let keys = model.hotkeys()[0].keys;
+    model.remove_hotkey(&keys).unwrap();
+    assert!(model.hotkeys().is_empty());
+}

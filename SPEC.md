@@ -70,7 +70,7 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-PRE-3: Apply commits each entry whose target differs from the monitor's current value (SPEC-WR-4, SPEC-WR-7). Entries for absent monitors are skipped; the result reports which were applied, skipped or failed.
 - SPEC-PRE-4: Apply order is fixed: `power`, `input`, `color-preset`, gains, `brightness`, `contrast`, `volume`. A failure in one entry does not stop the others. DDC/CI has no multi-value write, so each entry is a separate command; to minimise the visible transition, all entries are read first and the differing values are then written back to back without reads in between. After a colour-preset change the monitor loads that mode's stored values, so the remaining entries for that monitor are written even if they matched before the switch, after a short settle delay.
 - SPEC-PRE-4a: RGB gains belong to the monitor's user colour profiles (MCCS colour preset `0x0B`-`0x0D`), and writing a gain switches the monitor to one. When a preset selects any other colour preset for a monitor, its gain entries for that monitor are not captured, applied or compared (SPEC-PRE-7), and the editor marks them as not applied.
-- SPEC-PRE-5: Presets can be renamed, edited, deleted and reordered. Deleting a preset used by a schedule rule or hotkey requires confirmation and removes or flags those references.
+- SPEC-PRE-5: Presets can be renamed, edited, deleted and reordered. Renaming a preset updates the hotkeys that apply it. Deleting a preset used by a hotkey asks for confirmation (Settings) or requires `--force` (CLI) and deletes those hotkeys too; deleting one used by a schedule rule follows the same rule in v2.
 - SPEC-PRE-5a: The stored values of a preset can be viewed and individually changed or removed (Settings "Edit" page; CLI `preset set|unset`).
 - SPEC-PRE-5b: Presets are stored in the app's config file (`%APPDATA%\dispcontrol\config.toml`; CLI `preset path`). They can be exported to and imported from a commented, human-editable TOML document (CLI `preset export [file]`, `preset import <file> [--replace]`; Settings exports/imports `dispcontrol-presets.toml` next to the config file). Import merges by name unless `--replace` is given, and rejects an invalid document without changing the stored presets.
 - SPEC-PRE-6: "Cycle presets" applies the next preset in order, wrapping around; the starting point is the last applied preset or the first if none.
@@ -87,12 +87,12 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-SCH-8: Rule-triggered applies that include an input change follow SPEC-IN-1 (confirmation dialog).
 
 ## 8. Hotkeys
-- SPEC-HK-1: Actions: `preset:<name>`, `preset-next`, `preset-prev`, `brightness+/-`, `contrast+/-`, `volume+/-`, `input:<value>`, `power-toggle`, `schedule-toggle`.
-- SPEC-HK-2: Each action is bound to a user-defined key combination (must include at least one modifier, except function keys). Hotkeys apply to all monitors unless a target monitor is chosen.
-- SPEC-HK-3: Step size for `+/-` actions is configurable per control (default 5).
+- SPEC-HK-1: Actions: `preset:<name>`, `preset-next`, `preset-prev`, `brightness+/-`, `contrast+/-`, `volume+/-`, `input:<value>`, `power-toggle`, `schedule-toggle`. `schedule-toggle` becomes available with schedules (v2). `power-toggle` turns every target off (soft off, `0xD6`=4, preferred because most monitors keep answering DDC/CI) if any is on, otherwise turns them on; a monitor that stops answering in standby must be woken with its own button.
+- SPEC-HK-2: Each action is bound to a user-defined key combination (must include at least one modifier, except function keys). Hotkeys apply to all monitors unless a target monitor is chosen. A combination must include Ctrl, Alt or Win; Shift alone is not enough, because it would take over normal typing. Each combination can be bound once.
+- SPEC-HK-3: Step size for `+/-` actions is configurable per control (1-25 %, default 5). Steps start from the pending target, so a held key keeps stepping, and clamp to 0-100 % (SPEC-CTL-5).
 - SPEC-HK-4: Holding a hotkey repeats the action; commits follow SPEC-WR-2.
 - SPEC-HK-5: If a combination cannot be registered (taken by another app), the user sees which combination and action failed, and the app keeps running.
-- SPEC-HK-6: An optional on-screen indicator shows the control name and new value for about 1.5 s (setting, default on). It is not shown for confirmation dialogs.
+- SPEC-HK-6: An optional on-screen indicator shows the control name and new value for about 1.5 s (setting, default on). It is not shown for confirmation dialogs. Errors from a hotkey are shown in the indicator as "failed" and in the Settings status line.
 
 ## 9. User interface
 - SPEC-UI-1: The app runs as a tray icon with no taskbar button and no always-visible main window. Left-click toggles the control panel; right-click opens a menu: Presets, Pause/Resume schedule, Settings, Quit.
@@ -104,7 +104,7 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-UI-5: The panel follows the system light/dark theme and has a native Windows 11 appearance.
 - SPEC-UI-6: Settings include: hotkeys, step sizes, schedule rules, write delay, live preview, input confirmation and revert timer, on-screen indicator, start with Windows, audit log, monitor aliases.
 - SPEC-UI-7: The panel is fully keyboard-operable and exposes names/values to screen readers.
-- SPEC-UI-10 (v0 Settings): The default Settings window follows the visual design and interaction structure of `mockups/settings.html`, including a Windows 11-style navigation/sidebar, grouped content cards, monitor selection and controls, and safety/write settings. It shows only implemented features: discovered monitor selection and controls, quiet-period write setting, input-change confirmation, and input-revert timer. A Presets page (list with apply/rename/reorder/delete, save current with optional input source, current-match marker) is included from v1; Hotkeys and Schedule pages are omitted until implemented; unsupported controls are not displayed as available.
+- SPEC-UI-10 (v0 Settings): The default Settings window follows the visual design and interaction structure of `mockups/settings.html`, including a Windows 11-style navigation/sidebar, grouped content cards, monitor selection and controls, and safety/write settings. It shows only implemented features: discovered monitor selection and controls, quiet-period write setting, input-change confirmation, and input-revert timer. A Presets page (list with apply/rename/reorder/delete, save current with optional input source, current-match marker) is included from v1; a Hotkeys page (list with registration status and remove, add with a key-recording field, action and target monitor, per-control step sizes, on-screen indicator toggle) is included from v1; the Schedule page is omitted until implemented; unsupported controls are not displayed as available.
 - SPEC-UI-11 (Windows presentation fallback): `dispcontrold --native-ui` opens the original compact Win32 layout instead of the default grouped Settings layout. Both presentations use the same application API and behavior.
 
 ## 10. Command line
@@ -136,7 +136,7 @@ Exit codes: `0` success; `1` general error; `2` invalid usage or value; `3` moni
 - SPEC-INT-4 (optional): link `dispcontrol://preset/<name>` applies a preset.
 
 ## 12. Settings and data
-- SPEC-DAT-1: All settings, presets, rules and hotkeys live in one human-editable file in the user's profile; a file beside the executable enables portable mode.
+- SPEC-DAT-1: All settings, presets, rules and hotkeys live in one human-editable file in the user's profile; a file beside the executable enables portable mode. Hotkeys are stored as `[[hotkeys]]` entries with `keys` (e.g. `"Ctrl+Alt+Up"`), `action` (e.g. `"brightness+"`, `"preset:Night"`, `"input:0x11"`) and an optional `monitor`; step sizes and the indicator setting are top-level keys (`brightness_step`, `contrast_step`, `volume_step`, `show_osd`).
 - SPEC-DAT-2: Invalid or unknown fields in the file are reported with line information and never cause data loss; the app starts with defaults for the broken section and keeps a `.bak` copy.
 - SPEC-DAT-3: The file is written only when settings change, and atomically.
 - SPEC-DAT-4: The file carries a version number; future versions migrate older files.

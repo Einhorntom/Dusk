@@ -4,7 +4,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dispcontrol_app::{
-    Clock, InputChangePrompter, MonitorService, PresetRepository, SettingsRepository,
+    Clock, HotkeyRepository, InputChangePrompter, MonitorService, PresetRepository,
+    SettingsRepository,
 };
 use dispcontrol_ddc_windows::WindowsDdcBackend;
 use dispcontrol_domain::Monitor;
@@ -150,12 +151,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let backend = Arc::new(WindowsDdcBackend::new());
     let store = Arc::new(FileSettingsRepository::new(path));
     let settings: Arc<dyn SettingsRepository> = store.clone();
-    let presets: Arc<dyn PresetRepository> = store;
+    let presets: Arc<dyn PresetRepository> = store.clone();
+    let hotkeys: Arc<dyn HotkeyRepository> = store;
     let prompter = Arc::new(DesktopInputPrompter);
     let service = Arc::new(MonitorService::new(
         backend,
         settings,
         presets,
+        hotkeys,
         prompter,
         Arc::new(DesktopClock),
     ));

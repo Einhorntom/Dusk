@@ -39,6 +39,9 @@ enum Request {
     },
     PresetDelete {
         name: String,
+        /// Also delete the hotkeys that apply this preset (SPEC-PRE-5).
+        #[serde(default)]
+        force: bool,
     },
     PresetRename {
         name: String,
@@ -132,12 +135,38 @@ enum RequestValue {
     Enum(u32),
 }
 
+/// Settings on the wire. Fields added after v0 are optional in requests so
+/// that an older client's `settings_set` keeps their current values.
 #[derive(Deserialize, Serialize, Clone, Debug, Eq, PartialEq)]
 pub struct SettingsDto {
     pub debounce_ms: u32,
     pub confirm_input_change: bool,
     pub input_revert_seconds: u32,
     pub live_preview: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness_step: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contrast_step: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume_step: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_osd: Option<bool>,
+}
+
+impl SettingsDto {
+    /// Applies these settings over `current`, keeping fields the client left out.
+    pub fn apply_to(self, current: AppSettings) -> AppSettings {
+        AppSettings {
+            debounce_ms: self.debounce_ms,
+            confirm_input_change: self.confirm_input_change,
+            input_revert_seconds: self.input_revert_seconds,
+            live_preview: self.live_preview,
+            brightness_step: self.brightness_step.unwrap_or(current.brightness_step),
+            contrast_step: self.contrast_step.unwrap_or(current.contrast_step),
+            volume_step: self.volume_step.unwrap_or(current.volume_step),
+            show_osd: self.show_osd.unwrap_or(current.show_osd),
+        }
+    }
 }
 
 impl From<AppSettings> for SettingsDto {
@@ -147,17 +176,10 @@ impl From<AppSettings> for SettingsDto {
             confirm_input_change: value.confirm_input_change,
             input_revert_seconds: value.input_revert_seconds,
             live_preview: value.live_preview,
-        }
-    }
-}
-
-impl From<SettingsDto> for AppSettings {
-    fn from(value: SettingsDto) -> Self {
-        Self {
-            debounce_ms: value.debounce_ms,
-            confirm_input_change: value.confirm_input_change,
-            input_revert_seconds: value.input_revert_seconds,
-            live_preview: value.live_preview,
+            brightness_step: Some(value.brightness_step),
+            contrast_step: Some(value.contrast_step),
+            volume_step: Some(value.volume_step),
+            show_osd: Some(value.show_osd),
         }
     }
 }
@@ -286,15 +308,13 @@ fn dispatch_inner(
         }
         Request::SettingsGet => {
             let settings = service.settings().map_err(DispatchError::from_use_case)?;
-            Ok(serde_json::json!({
-                "debounce_ms": settings.debounce_ms,
-                "confirm_input_change": settings.confirm_input_change,
-                "input_revert_seconds": settings.input_revert_seconds,
-            }))
+            serde_json::to_value(SettingsDto::from(settings))
+                .map_err(|error| DispatchError::new(1, error.to_string()))
         }
         Request::SettingsSet { settings } => {
+            let current = service.settings().map_err(DispatchError::from_use_case)?;
             service
-                .update_settings(settings.into())
+                .update_settings(settings.apply_to(current))
                 .map_err(DispatchError::from_use_case)?;
             Ok(serde_json::json!({ "saved": true }))
         }
@@ -333,11 +353,24 @@ fn dispatch_inner(
                 .map_err(DispatchError::from_use_case)?;
             Ok(preset_to_json(&preset))
         }
-        Request::PresetDelete { name } => {
+        Request::PresetDelete { name, force } => {
+            let hotkeys = service
+                .hotkeys_using_preset(&name)
+                .map_err(DispatchError::from_use_case)?;
+            if !hotkeys.is_empty() && !force {
+                let keys: Vec<String> = hotkeys.iter().map(ToString::to_string).collect();
+                return Err(DispatchError::new(
+                    2,
+                    format!(
+                        "preset {name} is used by hotkeys {}; deleting it also deletes them (CLI: --force)",
+                        keys.join(", ")
+                    ),
+                ));
+            }
             service
                 .delete_preset(&name)
                 .map_err(DispatchError::from_use_case)?;
-            Ok(serde_json::json!({ "deleted": true }))
+            Ok(serde_json::json!({ "deleted": true, "hotkeys_removed": hotkeys.len() }))
         }
         Request::PresetRename { name, new_name } => {
             service
@@ -429,7 +462,9 @@ impl DispatchError {
 
     fn from_use_case(error: UseCaseError) -> Self {
         let code = match &error {
-            UseCaseError::Backend(BackendError::NotFound(_)) | UseCaseError::PresetNotFound(_) => 3,
+            UseCaseError::Backend(BackendError::NotFound(_))
+            | UseCaseError::PresetNotFound(_)
+            | UseCaseError::HotkeyNotFound(_) => 3,
             UseCaseError::Backend(BackendError::NotResponding(_)) => 4,
             UseCaseError::InputChangeDeclined | UseCaseError::InputChangeReverted => 6,
             UseCaseError::UnsupportedControl(_)
@@ -439,7 +474,8 @@ impl DispatchError {
                 | dispcontrol_domain::DomainError::EnumValueUnavailable { .. }
                 | dispcontrol_domain::DomainError::UnknownControl(_)
                 | dispcontrol_domain::DomainError::InvalidNumericCapability(_)
-                | dispcontrol_domain::DomainError::InvalidPresetName,
+                | dispcontrol_domain::DomainError::InvalidPresetName
+                | dispcontrol_domain::DomainError::InvalidHotkey(_),
             )
             | UseCaseError::SettingsInvalid(_) => 2,
             _ => 1,
@@ -491,7 +527,10 @@ mod tests {
     #[test]
     fn settings_dto_round_trips_values() {
         let value = SettingsDto::from(AppSettings::default());
-        assert_eq!(AppSettings::from(value.clone()), AppSettings::default());
+        assert_eq!(
+            value.clone().apply_to(AppSettings::default()),
+            AppSettings::default()
+        );
         assert_eq!(value.debounce_ms, 400);
         assert!(value.confirm_input_change);
     }
@@ -634,6 +673,51 @@ mod tests {
         );
         assert_eq!(again["code"], 3);
     }
+    #[test]
+    fn an_older_settings_request_keeps_the_hotkey_settings() {
+        let h = harness();
+        let mut settings = h.settings.stored();
+        settings.brightness_step = 10;
+        settings.show_osd = false;
+        h.settings.replace(settings);
+        let saved = call(
+            &h.service,
+            r#"{"op":"settings_set","settings":{"debounce_ms":800,"confirm_input_change":true,"input_revert_seconds":10,"live_preview":false}}"#,
+        );
+        assert_eq!(saved["ok"], true);
+        let stored = h.settings.stored();
+        assert_eq!(stored.debounce_ms, 800);
+        assert_eq!(stored.brightness_step, 10);
+        assert!(!stored.show_osd);
+        let read = call(&h.service, r#"{"op":"settings_get"}"#);
+        assert_eq!(read["result"]["brightness_step"], 10);
+    }
+
+    #[test]
+    fn deleting_a_preset_used_by_a_hotkey_needs_force() {
+        let h = harness();
+        call(&h.service, r#"{"op":"preset_save","name":"Night"}"#);
+        h.service
+            .save_hotkey(dispcontrol_domain::HotkeyBinding {
+                keys: "Ctrl+Alt+N".parse().unwrap(),
+                action: "preset:Night".parse().unwrap(),
+                monitor: None,
+            })
+            .unwrap();
+        let refused = call(&h.service, r#"{"op":"preset_delete","name":"Night"}"#);
+        assert_eq!(refused["code"], 2);
+        assert!(refused["error"].as_str().unwrap().contains("Ctrl+Alt+N"));
+        assert_eq!(h.presets.stored().len(), 1);
+
+        let deleted = call(
+            &h.service,
+            r#"{"op":"preset_delete","name":"Night","force":true}"#,
+        );
+        assert_eq!(deleted["result"]["hotkeys_removed"], 1);
+        assert!(h.presets.stored().is_empty());
+        assert!(h.hotkeys.stored().is_empty());
+    }
+
     #[test]
     fn dispatch_exports_and_imports_preset_documents() {
         let h = harness();
