@@ -3,10 +3,10 @@
 
 use std::sync::Arc;
 
-use dispcontrol_app::{BackendError, CompositeBackend, MonitorBackend};
-use dispcontrol_ddc_fake::contract::check_backend_contract;
-use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor};
-use dispcontrol_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
+use dusk_app::{BackendError, CompositeBackend, MonitorBackend};
+use dusk_ddc_fake::contract::check_backend_contract;
+use dusk_ddc_fake::{FakeBackend, FakeMonitor};
+use dusk_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
 
 fn id(text: &str) -> MonitorId {
     MonitorId::new(text).unwrap()

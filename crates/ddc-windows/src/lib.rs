@@ -11,9 +11,9 @@ use windows::Win32::Foundation::{ERROR_NOT_FOUND, LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, HMONITOR, MONITORENUMPROC};
 use windows::core::BOOL;
 
-use dispcontrol_app::{BackendError, MonitorBackend};
-use dispcontrol_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
-use dispcontrol_mccs::{Capabilities, parse_capabilities};
+use dusk_app::{BackendError, MonitorBackend};
+use dusk_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
+use dusk_mccs::{Capabilities, parse_capabilities};
 
 struct PhysicalMonitor {
     id: MonitorId,
@@ -277,7 +277,7 @@ mod tests {
     #[test]
     #[ignore = "reads the real monitors over DDC/CI; run with --ignored"]
     fn windows_backend_meets_the_backend_contract() {
-        dispcontrol_ddc_fake::contract::check_backend_contract(&WindowsDdcBackend::new());
+        dusk_ddc_fake::contract::check_backend_contract(&WindowsDdcBackend::new());
     }
 
     #[test]

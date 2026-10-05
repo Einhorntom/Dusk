@@ -4,8 +4,8 @@ mod windows_pipe;
 use std::fmt;
 use std::str::FromStr;
 
-use dispcontrol_app::{Api, ApplyReport, BackendError, EntryStatus, UseCaseError};
-use dispcontrol_domain::{AppSettings, ControlKey, ControlValue, MonitorId, Preset, PresetEntry};
+use dusk_app::{Api, ApplyReport, BackendError, EntryStatus, UseCaseError};
+use dusk_domain::{AppSettings, ControlKey, ControlValue, MonitorId, Preset, PresetEntry};
 use serde::{Deserialize, Serialize};
 
 const MAX_MESSAGE_SIZE: usize = 1_048_576;
@@ -480,12 +480,12 @@ impl DispatchError {
             UseCaseError::UnsupportedControl(_)
             | UseCaseError::PresetExists(_)
             | UseCaseError::Domain(
-                dispcontrol_domain::DomainError::NormalizedValueOutOfRange(_)
-                | dispcontrol_domain::DomainError::EnumValueUnavailable { .. }
-                | dispcontrol_domain::DomainError::UnknownControl(_)
-                | dispcontrol_domain::DomainError::InvalidNumericCapability(_)
-                | dispcontrol_domain::DomainError::InvalidPresetName
-                | dispcontrol_domain::DomainError::InvalidHotkey(_),
+                dusk_domain::DomainError::NormalizedValueOutOfRange(_)
+                | dusk_domain::DomainError::EnumValueUnavailable { .. }
+                | dusk_domain::DomainError::UnknownControl(_)
+                | dusk_domain::DomainError::InvalidNumericCapability(_)
+                | dusk_domain::DomainError::InvalidPresetName
+                | dusk_domain::DomainError::InvalidHotkey(_),
             )
             | UseCaseError::SettingsInvalid(_) => 2,
             _ => 1,
@@ -504,7 +504,7 @@ pub enum IpcError {
 impl fmt::Display for IpcError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::DaemonUnavailable => f.write_str("dispcontrold is not running"),
+            Self::DaemonUnavailable => f.write_str("duskd is not running"),
             Self::Io(error) => write!(f, "IPC I/O failed: {error}"),
             Self::Protocol(error) => write!(f, "IPC protocol error: {error}"),
         }
@@ -519,7 +519,7 @@ pub use windows_pipe::{PIPE_ENV, serve_forever, transact};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor, Harness};
+    use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
     use std::sync::Arc;
 
     fn harness() -> Harness {
@@ -530,7 +530,7 @@ mod tests {
         )))
     }
 
-    fn service() -> Arc<dispcontrol_app::MonitorService> {
+    fn service() -> Arc<dusk_app::MonitorService> {
         harness().service
     }
 
@@ -607,7 +607,7 @@ mod tests {
         assert_eq!(read_back["result"]["input_revert_seconds"], 0);
     }
 
-    fn call(service: &dispcontrol_app::MonitorService, request: &str) -> serde_json::Value {
+    fn call(service: &dusk_app::MonitorService, request: &str) -> serde_json::Value {
         serde_json::from_slice(&dispatch(service, request.as_bytes())).unwrap()
     }
 
@@ -708,7 +708,7 @@ mod tests {
         let h = harness();
         call(&h.service, r#"{"op":"preset_save","name":"Night"}"#);
         h.service
-            .save_hotkey(dispcontrol_domain::HotkeyBinding {
+            .save_hotkey(dusk_domain::HotkeyBinding {
                 keys: "Ctrl+Alt+N".parse().unwrap(),
                 action: "preset:Night".parse().unwrap(),
                 monitor: None,
@@ -798,8 +798,8 @@ mod windows_tests {
 
     use super::windows_pipe::{serve_forever_on, transact_on};
     use super::{IpcError, MAX_MESSAGE_SIZE, dispatch};
-    use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor, Harness};
-    use dispcontrol_domain::ControlKey;
+    use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
+    use dusk_domain::ControlKey;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
     use std::time::{Duration, Instant};
@@ -807,7 +807,7 @@ mod windows_tests {
     fn unique_pipe_name() -> String {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         format!(
-            r"\\.\pipe\dispcontrol-test-{}-{}",
+            r"\\.\pipe\dusk-test-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         )

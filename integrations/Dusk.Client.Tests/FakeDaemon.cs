@@ -1,6 +1,6 @@
-using Dispcontrol.Client;
+using Dusk.Client;
 
-namespace Dispcontrol.Client.Tests;
+namespace Dusk.Client.Tests;
 
 /// <summary>An in-memory daemon: monitors with readings, presets, and a log of writes.</summary>
 internal sealed class FakeDaemon : IDaemon

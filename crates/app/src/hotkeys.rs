@@ -2,7 +2,7 @@
 //! Key registration itself belongs to the UI adapter; it calls `run_hotkey`
 //! with the combination that was pressed.
 
-use dispcontrol_domain::{
+use dusk_domain::{
     ControlKey, ControlValue, DomainError, HotkeyAction, HotkeyBinding, KeyCombo, MonitorId,
     preset_names_equal,
 };

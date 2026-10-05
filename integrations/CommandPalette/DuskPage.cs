@@ -1,22 +1,22 @@
-using Dispcontrol.Client;
+using Dusk.Client;
 using Microsoft.CommandPalette.Extensions;
 using Microsoft.CommandPalette.Extensions.Toolkit;
 
-namespace Dispcontrol.CommandPalette;
+namespace Dusk.CommandPalette;
 
 /// <summary>
-/// Searchable page with the same commands as PowerToys Run's "dc": preset
+/// Searchable page with the same commands as PowerToys Run's "dusk": preset
 /// names, brightness 40, contrast 60, volume 20, input hdmi (SPEC-INT-2).
 /// </summary>
-internal sealed partial class DispcontrolPage : DynamicListPage
+internal sealed partial class DuskPage : DynamicListPage
 {
     private readonly IDaemon daemon;
 
-    public DispcontrolPage(IDaemon daemon)
+    public DuskPage(IDaemon daemon)
     {
         this.daemon = daemon;
-        Icon = DispcontrolCommandsProvider.AppIcon;
-        Title = "dispcontrol";
+        Icon = DuskCommandsProvider.AppIcon;
+        Title = "Dusk";
         Name = "Open";
         PlaceholderText = ResultBuilder.Usage;
     }
@@ -32,7 +32,7 @@ internal sealed partial class DispcontrolPage : DynamicListPage
             {
                 Title = item.Title,
                 Subtitle = item.Subtitle,
-                Icon = DispcontrolCommandsProvider.AppIcon,
+                Icon = DuskCommandsProvider.AppIcon,
             })];
 }
 

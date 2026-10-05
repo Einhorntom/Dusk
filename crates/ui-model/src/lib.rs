@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 pub mod text;
 
-use dispcontrol_app::{Api, ApplyReport, HotkeyOutcome, ImportSummary, UseCaseError};
-use dispcontrol_domain::{
+use dusk_app::{Api, ApplyReport, HotkeyOutcome, ImportSummary, UseCaseError};
+use dusk_domain::{
     AppSettings, ControlKey, ControlReading, ControlValue, HotkeyAction, HotkeyBinding, KeyCombo,
     Monitor, MonitorId, Preset, PresetEntry,
 };

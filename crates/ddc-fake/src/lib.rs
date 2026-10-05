@@ -10,8 +10,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use dispcontrol_app::{BackendError, MonitorBackend, MonitorService};
-use dispcontrol_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
+use dusk_app::{BackendError, MonitorBackend, MonitorService};
+use dusk_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
 
 pub mod contract;
 pub mod ports;
@@ -357,11 +357,8 @@ mod tests {
             FakeMonitor::new("bare").numeric(ControlKey::Brightness, 30, 100),
         ]));
         contract::check_backend_contract(backend.as_ref());
-        let timed = dispcontrol_app::TimedBackend::new(
-            backend.clone(),
-            std::time::Duration::from_secs(1),
-            1,
-        );
+        let timed =
+            dusk_app::TimedBackend::new(backend.clone(), std::time::Duration::from_secs(1), 1);
         contract::check_backend_contract(&timed);
         assert!(backend.writes().is_empty());
     }

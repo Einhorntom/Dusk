@@ -2,8 +2,8 @@
 
 use std::str::FromStr;
 
-use dispcontrol_domain::ControlKey;
-use dispcontrol_ipc::{IpcError, transact};
+use dusk_domain::ControlKey;
+use dusk_ipc::{IpcError, transact};
 use serde_json::{Value, json};
 
 #[derive(Debug)]
@@ -290,7 +290,7 @@ fn parse_control(value: &str, json_output: bool) -> Result<ControlKey, CliError>
 fn usage_error(message: &str, json_output: bool) -> CliError {
     cli_error(
         &format!(
-            "{message}\nUsage: dispcontrol [--json] list | get <monitor-id> <control> | \
+            "{message}\nUsage: dusk [--json] list | get <monitor-id> <control> | \
              set <monitor-id> <control> <value> | settings show | preset list | \
              preset apply <name> | preset next | preset prev | \
              preset save <name> [monitor-id] [--include-input] | preset delete <name> [--force] | \
@@ -408,6 +408,6 @@ mod tests {
         let error = run(&args).unwrap_err();
         assert_eq!(error.exit_code, 2);
         assert!(!error.json_output);
-        assert!(error.message.contains("Usage: dispcontrol"));
+        assert!(error.message.contains("Usage: dusk"));
     }
 }

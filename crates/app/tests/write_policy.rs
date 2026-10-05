@@ -2,9 +2,9 @@
 
 use std::time::Duration;
 
-use dispcontrol_app::{Clock, UseCaseError};
-use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor, Harness};
-use dispcontrol_domain::{ControlKey, ControlValue, MIN_WRITE_INTERVAL, MonitorId};
+use dusk_app::{Clock, UseCaseError};
+use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
+use dusk_domain::{ControlKey, ControlValue, MIN_WRITE_INTERVAL, MonitorId};
 
 fn brightness_monitor() -> (Harness, MonitorId) {
     let monitor = FakeMonitor::new("test-monitor").numeric(ControlKey::Brightness, 50, 100);

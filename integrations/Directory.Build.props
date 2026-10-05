@@ -6,6 +6,6 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Version>0.1.0</Version>
-    <Authors>dispcontrol</Authors>
+    <Authors>Dusk</Authors>
   </PropertyGroup>
 </Project>

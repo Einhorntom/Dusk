@@ -4,11 +4,11 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use dispcontrol_app::BackendError;
-use dispcontrol_cli::{CliError, run_with};
-use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor, Harness};
-use dispcontrol_domain::{ControlKey, MonitorId};
-use dispcontrol_ipc::{IpcError, dispatch};
+use dusk_app::BackendError;
+use dusk_cli::{CliError, run_with};
+use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
+use dusk_domain::{ControlKey, MonitorId};
+use dusk_ipc::{IpcError, dispatch};
 use serde_json::Value;
 
 fn harness() -> Harness {
@@ -36,7 +36,7 @@ impl TempFile {
     fn new() -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         Self(std::env::temp_dir().join(format!(
-            "dispcontrol-cli-test-{}-{}.toml",
+            "dusk-cli-test-{}-{}.toml",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         )))

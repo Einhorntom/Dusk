@@ -3,13 +3,13 @@
 
 use std::path::{Path, PathBuf};
 
-use dispcontrol_app::{ApplyReport, EntryStatus, HotkeyOutcome, ImportSummary};
-use dispcontrol_domain::{
+use dusk_app::{ApplyReport, EntryStatus, HotkeyOutcome, ImportSummary};
+use dusk_domain::{
     ControlKey, ControlValue, HotkeyAction, HotkeyBinding, Preset, PresetEntry, STEPPABLE_CONTROLS,
 };
 
 /// File name used by the Settings Export/Import buttons, next to the config file.
-pub const PRESET_EXCHANGE_FILE: &str = "dispcontrol-presets.toml";
+pub const PRESET_EXCHANGE_FILE: &str = "dusk-presets.toml";
 
 pub fn control_title(key: ControlKey) -> &'static str {
     match key {
@@ -224,8 +224,8 @@ pub fn hotkey_indicator(outcome: &HotkeyOutcome) -> Option<Indicator> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dispcontrol_app::EntryOutcome;
-    use dispcontrol_domain::MonitorId;
+    use dusk_app::EntryOutcome;
+    use dusk_domain::MonitorId;
 
     fn entry(control: ControlKey, value: ControlValue) -> PresetEntry {
         PresetEntry {
@@ -363,7 +363,7 @@ mod tests {
             "Volume down on all monitors"
         );
         let targeted = HotkeyBinding {
-            monitor: Some(dispcontrol_domain::MonitorId::new("L32p-30#0").unwrap()),
+            monitor: Some(dusk_domain::MonitorId::new("L32p-30#0").unwrap()),
             ..binding.clone()
         };
         assert_eq!(
@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn indicators_show_steps_presets_and_power_but_not_inputs() {
-        let monitor = dispcontrol_domain::MonitorId::new("m").unwrap();
+        let monitor = dusk_domain::MonitorId::new("m").unwrap();
         let step = HotkeyOutcome::Stepped {
             control: ControlKey::Contrast,
             values: vec![(monitor, 35)],
@@ -453,8 +453,8 @@ mod tests {
     #[test]
     fn exchange_file_sits_next_to_the_config_file() {
         assert_eq!(
-            exchange_path(r"C:\Users\me\AppData\Roaming\dispcontrol\config.toml"),
-            Path::new(r"C:\Users\me\AppData\Roaming\dispcontrol").join(PRESET_EXCHANGE_FILE)
+            exchange_path(r"C:\Users\me\AppData\Roaming\Dusk\config.toml"),
+            Path::new(r"C:\Users\me\AppData\Roaming\Dusk").join(PRESET_EXCHANGE_FILE)
         );
         assert_eq!(exchange_path(""), PathBuf::from(PRESET_EXCHANGE_FILE));
         assert_eq!(

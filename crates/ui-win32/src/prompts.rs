@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dispcontrol_app::InputChangePrompter;
-use dispcontrol_domain::Monitor;
+use dusk_app::InputChangePrompter;
+use dusk_domain::Monitor;
 use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -54,7 +54,7 @@ impl InputChangePrompter for DesktopInputPrompter {
         let timer_completed = completed.clone();
         let timer_title = title.clone();
         let timer = thread::Builder::new()
-            .name("dispcontrol-input-revert".into())
+            .name("dusk-input-revert".into())
             .spawn(move || {
                 let deadline = Instant::now() + Duration::from_secs(timeout_seconds.into());
                 loop {

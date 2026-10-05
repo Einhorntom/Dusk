@@ -1,4 +1,4 @@
-# PRD: dispcontrol
+# PRD: Dusk
 
 A lightweight, open-source tool for controlling external monitors and the laptop's built-in display from the desktop: quickly, with hotkeys, presets and schedules.
 Status: Draft v0.5. Design and technology notes live in [ARCH.md](./ARCH.md).

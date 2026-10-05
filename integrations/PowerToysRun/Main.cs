@@ -1,12 +1,12 @@
-using Dispcontrol.Client;
+using Dusk.Client;
 using ManagedCommon;
 using Wox.Plugin;
 
-namespace Dispcontrol.PowerToysRun;
+namespace Dusk.PowerToysRun;
 
 /// <summary>
 /// PowerToys Run plugin, keyword <c>dc</c> (SPEC-INT-1). Results and actions
-/// come from Dispcontrol.Client; all rules stay in the daemon (SPEC-INT-3).
+/// come from Dusk.Client; all rules stay in the daemon (SPEC-INT-3).
 /// </summary>
 public sealed class Main : IPlugin, IDisposable
 {
@@ -15,7 +15,7 @@ public sealed class Main : IPlugin, IDisposable
 
     private readonly IDaemon daemon;
     private PluginInitContext? context;
-    private string iconPath = "Images\\dispcontrol.dark.png";
+    private string iconPath = "Images\\dusk.dark.png";
 
     public Main()
         : this(new PipeDaemon())
@@ -27,7 +27,7 @@ public sealed class Main : IPlugin, IDisposable
         this.daemon = daemon;
     }
 
-    public string Name => "dispcontrol";
+    public string Name => "Dusk";
 
     public string Description => "Apply monitor presets and set brightness, contrast, volume or input.";
 
@@ -70,7 +70,7 @@ public sealed class Main : IPlugin, IDisposable
             var message = ActionRunner.Run(action, daemon);
             if (message != "Done" && !message.StartsWith("Applied ", StringComparison.Ordinal))
             {
-                context?.API.ShowMsg("dispcontrol", message, iconPath);
+                context?.API.ShowMsg("Dusk", message, iconPath);
             }
         });
         return true;
@@ -80,8 +80,8 @@ public sealed class Main : IPlugin, IDisposable
 
     private void UpdateIcon(Theme theme) =>
         iconPath = theme is Theme.Light or Theme.HighContrastWhite
-            ? "Images\\dispcontrol.light.png"
-            : "Images\\dispcontrol.dark.png";
+            ? "Images\\dusk.light.png"
+            : "Images\\dusk.dark.png";
 
     public void Dispose()
     {

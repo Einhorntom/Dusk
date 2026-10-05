@@ -1,13 +1,13 @@
 [package]
-name = "dispcontrol-ui-win32"
+name = "dusk-ui-win32"
 version = "0.1.0"
 edition = "2024"
 publish = false
 
 [dependencies]
-dispcontrol-app = { path = "../app" }
-dispcontrol-domain = { path = "../domain" }
-dispcontrol-ui-model = { path = "../ui-model" }
+dusk-app = { path = "../app" }
+dusk-domain = { path = "../domain" }
+dusk-ui-model = { path = "../ui-model" }
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",

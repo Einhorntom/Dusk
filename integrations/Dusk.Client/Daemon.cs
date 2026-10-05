@@ -3,7 +3,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Text.Json.Nodes;
 
-namespace Dispcontrol.Client;
+namespace Dusk.Client;
 
 /// <summary>A connected monitor, as listed by the daemon.</summary>
 public sealed record MonitorInfo(string Id, string Name);
@@ -20,8 +20,8 @@ public sealed record PresetInfo(string Name, int Settings);
 
 public sealed record ApplySummary(string Preset, int Applied, int Unchanged, int Skipped, int Failed);
 
-/// <summary>The daemon (dispcontrold) is not running.</summary>
-public sealed class DaemonUnavailableException() : Exception("dispcontrol is not running");
+/// <summary>The daemon (duskd) is not running.</summary>
+public sealed class DaemonUnavailableException() : Exception("Dusk is not running");
 
 /// <summary>The daemon refused a request; <see cref="Code"/> is the CLI exit code.</summary>
 public sealed class DaemonException(int code, string message) : Exception(message)
@@ -45,9 +45,9 @@ public interface IDaemon
 /// </summary>
 public sealed class PipeDaemon : IDaemon
 {
-    public const string DefaultPipe = "dispcontrol-v0";
+    public const string DefaultPipe = "dusk-v0";
     /// <summary>Same override as the daemon and the CLI.</summary>
-    public const string PipeEnvironmentVariable = "DISPCONTROL_PIPE";
+    public const string PipeEnvironmentVariable = "DUSK_PIPE";
     private const int MaxMessageSize = 1_048_576;
 
     private readonly string pipeName;

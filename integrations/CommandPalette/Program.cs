@@ -2,7 +2,7 @@ using Microsoft.CommandPalette.Extensions;
 using Shmuelie.WinRTServer;
 using Shmuelie.WinRTServer.CsWinRT;
 
-namespace Dispcontrol.CommandPalette;
+namespace Dusk.CommandPalette;
 
 public static class Program
 {
@@ -16,13 +16,13 @@ public static class Program
     {
         if (args.Length == 0 || args[0] != "-RegisterProcessAsComServer")
         {
-            Console.WriteLine("This is the dispcontrol Command Palette extension; Command Palette starts it.");
+            Console.WriteLine("This is the Dusk Command Palette extension; Command Palette starts it.");
             return;
         }
         using var disposed = new ManualResetEvent(false);
-        var extension = new DispcontrolExtension(disposed);
+        var extension = new DuskExtension(disposed);
         var server = new ComServer();
-        server.RegisterClass<DispcontrolExtension, IExtension>(() => extension);
+        server.RegisterClass<DuskExtension, IExtension>(() => extension);
         server.Start();
         disposed.WaitOne();
         server.Stop();

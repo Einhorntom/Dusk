@@ -1,12 +1,12 @@
 [package]
-name = "dispcontrol-store-file"
+name = "dusk-store-file"
 version = "0.1.0"
 edition = "2024"
 publish = false
 
 [dependencies]
-dispcontrol-app = { path = "../app" }
-dispcontrol-domain = { path = "../domain" }
+dusk-app = { path = "../app" }
+dusk-domain = { path = "../domain" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 windows = { version = "0.62", features = ["Win32_Storage_FileSystem"] }

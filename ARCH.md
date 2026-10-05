@@ -1,9 +1,9 @@
-# dispcontrol: Architecture
+# Dusk: Architecture
 
 Status: Architecture v0.3. Derived from [PRD.md](./PRD.md) and [SPEC.md](./SPEC.md). Describes *how* the product is built. Requirement IDs (`SPEC-...`) refer to the spec.
 
 ## 1. Purpose and scope
-This document defines the structure of dispcontrol: layers, modules (Rust crates), the interfaces between them, the runtime model, and the platform-specific parts. It follows Clean Architecture (section 2), and section 3 explains how each guideline is applied here.
+This document defines the structure of Dusk: layers, modules (Rust crates), the interfaces between them, the runtime model, and the platform-specific parts. It follows Clean Architecture (section 2), and section 3 explains how each guideline is applied here.
 
 Non-goals: UI pixel design (see `mockups/`), exact data formats (a later "data formats" appendix of the spec), and release process details.
 
@@ -31,7 +31,7 @@ These are the guidelines from Robert C. Martin's *Clean Architecture*, stated as
 
 ## 3. How this architecture follows the guidelines
 
-| Guideline | How dispcontrol applies it |
+| Guideline | How Dusk applies it |
 |---|---|
 | G1 Dependency Rule | The Rust workspace is split into crates whose `Cargo.toml` dependencies only point inward (section 5). A crate cannot import something it does not depend on, so a violation fails to compile. |
 | G2 Four layers | Entities = `domain` crate. Use cases = `app` crate. Interface adapters = `adapters/*`, `ui-model`, CLI presenter, IPC mapping. Frameworks and drivers = `windows-rs`, Dxva2, Win32/Direct2D, i2c, filesystem, `toml`. |
@@ -44,7 +44,7 @@ These are the guidelines from Robert C. Martin's *Clean Architecture*, stated as
 | G9 Independence | Framework independence: the core builds and tests with no `windows` crate. UI independence: CLI, tray UI, plugins and tests all drive the same `Api`. Storage independence: config is behind `ConfigRepository`. Hardware independence: tests use `ddc-fake`. |
 | G10 Plugins | New GPU paths (Intel IGCL, NVAPI), laptop panel control, software dimming, a Linux tray, or macOS are new adapters; the core does not change (this is how the PRD's future features fit). |
 | G11 Humble Object | Window procedures and the DDC FFI calls are humble: they only translate and forward. Behavior lives in `ui-model` (view models, formatting, enabled/disabled logic) and in `app`, both unit-testable. |
-| G12 Main is a plugin | Two small executables (`dispcontrol` CLI, `dispcontrold` tray app) are the composition roots: they construct adapters, inject them into the engine, and start it. Nothing else instantiates concrete adapters. |
+| G12 Main is a plugin | Two small executables (`dusk` CLI, `duskd` tray app) are the composition roots: they construct adapters, inject them into the engine, and start it. Nothing else instantiates concrete adapters. |
 | G13 Screaming | Crate and module names are `monitor`, `control`, `preset`, `schedule`, `write_policy`, `input_safety`, not `windows`, `serde`, `ui`. |
 | G14 Component principles | See section 5.3. |
 | G15 Enforcement | CI checks the crate graph (section 12) and forbids `unsafe` and OS/framework crates in `domain` and `app`. |
@@ -54,12 +54,12 @@ These are the guidelines from Robert C. Martin's *Clean Architecture*, stated as
 ```mermaid
 flowchart LR
   User((User)) --> Tray[Tray panel / Settings / Hotkeys]
-  User --> CLI[dispcontrol CLI]
+  User --> CLI[Dusk CLI]
   User --> PT[PowerToys Run / Command Palette]
   Tray --> Core
   CLI --> Core
   PT --> Core
-  Core[dispcontrol core] --> HW[(Monitor via DDC/CI)]
+  Core[Dusk core] --> HW[(Monitor via DDC/CI)]
   Core --> FS[(Config file)]
   OS[OS events: wake, unlock, display change, clock] --> Core
 ```
@@ -76,7 +76,7 @@ flowchart TB
     DDCL[ddc-linux: i2c-dev]
     FILE[store-file: files, TOML]
     PIPE[ipc transports: named pipe / unix socket]
-    BINS[dispcontrol, dispcontrold executables]
+    BINS[Dusk, duskd executables]
   end
   subgraph L3[Interface adapters]
     MODEL[ui-model: view models]
@@ -97,7 +97,7 @@ Arrows mean "depends on". Nothing points upward.
 
 ### 5.2 Repository layout
 ```
-dispcontrol/
+Dusk/
   crates/
     domain/            entities and pure rules                         (layer 1)
     app/               use cases, engine, port traits                  (layer 2)
@@ -111,11 +111,11 @@ dispcontrol/
     ddc-linux/         MonitorBackend over /dev/i2c-*                  (layer 4)
     store-file/        ConfigRepository, QuirkRepository, caches       (layer 4)
     ui-win32/          tray, panel, settings, OSD, hotkeys, prompts    (layer 4)
-    bin-cli/           `dispcontrol` executable (composition root)     (layer 4)
-    bin-daemon/        `dispcontrold` executable (composition root)    (layer 4)
+    bin-cli/           `dusk` executable (composition root)     (layer 4)
+    bin-daemon/        `duskd` executable (composition root)    (layer 4)
   integrations/
-    Dispcontrol.Client/      C# pipe client, "dc" query parsing, results (shared)
-    Dispcontrol.Client.Tests/
+    Dusk.Client/      C# pipe client, "dusk" query parsing, results (shared)
+    Dusk.Client.Tests/
     PowerToysRun/            PowerToys Run plugin (thin adapter)
     CommandPalette/          Command Palette extension (thin adapter, COM server)
   quirks/              per-model quirk profiles (data)
@@ -183,7 +183,7 @@ trait Api {
   subscribe() -> Events           // Snapshot updates, results, prompts
 }
 ```
-Two implementations exist: `Engine` (in-process, hosted only by `dispcontrold` and tests) and `IpcClient` (in `ipc`, forwards to a running `dispcontrold`). The CLI and plugins only ever use `IpcClient` and never talk to monitors (SPEC-CLI-2).
+Two implementations exist: `Engine` (in-process, hosted only by `duskd` and tests) and `IpcClient` (in `ipc`, forwards to a running `duskd`). The CLI and plugins only ever use `IpcClient` and never talk to monitors (SPEC-CLI-2).
 
 **As implemented:** the in-process implementation is `MonitorService`. The inbound port is split by concern (interface segregation): `ControlApi` (monitors and controls), `SettingsApi`, `PresetApi` and `HotkeyApi`; `Api` combines them and is implemented automatically for anything implementing all four. The Settings UI uses `Api`; `ipc::dispatch` takes `&dyn Api` and never names the concrete service.
 
@@ -209,7 +209,7 @@ The core speaks in `ControlKey` and `NativeValue`. VCP codes, capability strings
 
 ## 7. Runtime model
 - **No async runtime.** Plain OS threads and channels (`std`), to keep binary size and idle cost small.
-- **Threads in `dispcontrold`:**
+- **Threads in `duskd`:**
   1. **UI thread**: Win32 message loop; owns tray, panel, settings, OSD, dialogs; registers hotkeys; receives system messages (`WM_POWERBROADCAST`, `WM_WTSSESSION_CHANGE`, `WM_DISPLAYCHANGE`, `WM_TIMECHANGE`).
   2. **Engine thread**: an actor that owns all mutable state (monitor registry, write buffers, schedule, revert timers). It blocks on a command channel with a timeout equal to the nearest deadline (debounce, rate limit release, next rule, revert). With no deadline it blocks forever: idle CPU is 0 (SPEC-NFR-1).
   3. **One I/O worker per monitor**: serializes DDC calls (DDC/CI is not safe to run concurrently per monitor).
@@ -273,9 +273,9 @@ Presets and schedule rules that contain an input change go through the same path
 
 ### 8.4 CLI
 ```text
-dispcontrol set brightness 40
+dusk set brightness 40
   -> cli parses args into an Api call
-  -> IpcClient forwards to dispcontrold (shared buffers, limits, confirmation)
+  -> IpcClient forwards to duskd (shared buffers, limits, confirmation)
   -> daemon not running (pipe/socket connect fails): no side effects, error "app not running", exit code 7
   -> cli presenter prints text or JSON and maps errors to exit codes (SPEC section 10)
 ```
@@ -299,13 +299,13 @@ dispcontrol set brightness 40
 **`ddc-fake`:** configurable simulated monitors (capabilities, scripted read/write failures, disconnects; latency and hangs are not simulated yet) plus in-memory doubles of the other ports (settings, presets with an export/import round trip, a scripted input prompter, a manual clock) and a `Harness` that wires them into a `MonitorService`. Used by the `app`, `ipc`, `cli` and `ui-model` tests and for demos.
 
 ### 9.2 Persistence (`store-file`)
-- Single human-editable **TOML** file in `%APPDATA%\dispcontrol\config.toml` (`~/.config/dispcontrol/config.toml` on Linux); a `config.toml` beside the executable switches to portable mode (SPEC-DAT-1).
+- Single human-editable **TOML** file in `%APPDATA%\Dusk\config.toml` (`~/.config/dusk/config.toml` on Linux); a `config.toml` beside the executable switches to portable mode (SPEC-DAT-1).
 - Config DTOs (with `serde`) live only in this crate and are mapped to domain types; the domain has no `serde` dependency (G8, G9).
 - Writes are atomic (write temp, then replace) and happen only when settings change (SPEC-DAT-3). On parse errors, the broken section falls back to defaults, a `.bak` copy is kept, and the error is reported with line info (SPEC-DAT-2). A `version` field supports migration (SPEC-DAT-4).
 - Quirk profiles are TOML data files: shipped set embedded in the binary plus a user directory that overrides (SPEC-QRK-2). The capability cache and audit counters are separate small files in the local data directory, so the config file stays hand-editable.
 
 ### 9.3 IPC (`ipc`)
-- **Transport:** named pipe `\\.\pipe\dispcontrol-<user>` on Windows, Unix socket in `$XDG_RUNTIME_DIR` on Linux. Access limited to the current user (pipe ACL / socket mode 0600). No network listener at all (SPEC-NFR-2).
+- **Transport:** named pipe `\\.\pipe\dusk-<user>` on Windows, Unix socket in `$XDG_RUNTIME_DIR` on Linux. Access limited to the current user (pipe ACL / socket mode 0600). No network listener at all (SPEC-NFR-2).
 - **Protocol:** length-prefixed JSON messages, versioned, one request/response per call plus an event stream for `subscribe`. The wire DTOs live in `ipc` and are mapped to `Api` calls; the protocol is documented because the C# plugins implement it directly.
 - **Single instance:** a named mutex (Windows) or lock file (Linux) in `bin-daemon`. A second launch forwards its request over IPC and exits.
 
@@ -322,16 +322,16 @@ Presenter and controller for the command line: parses arguments, calls `Api`, re
 - `bin-daemon` is a GUI-subsystem executable (no console window).
 
 ### 9.6 PowerToys integrations (`integrations/`)
-Thin C# clients of the IPC protocol (they hold no rules): PowerToys Run plugin (keyword `dc`) and a Command Palette extension. If the daemon is not running they show an "app not running" error and do nothing else. They cannot bypass input confirmation or write protection because those are enforced in the engine (SPEC-INT-3).
+Thin C# clients of the IPC protocol (they hold no rules): PowerToys Run plugin (keyword `dusk`) and a Command Palette extension. If the daemon is not running they show an "app not running" error and do nothing else. They cannot bypass input confirmation or write protection because those are enforced in the engine (SPEC-INT-3).
 
 **As implemented:**
-- **`Dispcontrol.Client`** (net9.0, no PowerToys dependency): `PipeDaemon` speaks the IPC protocol (length-prefixed JSON, `DISPCONTROL_PIPE` override); `QueryParser` turns the typed text into a command; `ResultBuilder` turns a command plus daemon state into result items with an optional action; `ActionRunner` runs an action. Both PowerToys adapters only map these items to their own types. Enum names come from the daemon (`value_name`, `enum_names` from `ControlKey::value_name`), so no table is duplicated in C#.
+- **`Dusk.Client`** (net9.0, no PowerToys dependency): `PipeDaemon` speaks the IPC protocol (length-prefixed JSON, `DUSK_PIPE` override); `QueryParser` turns the typed text into a command; `ResultBuilder` turns a command plus daemon state into result items with an optional action; `ActionRunner` runs an action. Both PowerToys adapters only map these items to their own types. Enum names come from the daemon (`value_name`, `enum_names` from `ControlKey::value_name`), so no table is duplicated in C#.
 - **PowerToys Run** (`PowerToysRun`, net9.0-windows, like PowerToys 0.96): compiled against `Community.PowerToys.Run.Plugin.Dependencies` 0.96.1; PowerToys' own assemblies are not shipped with the plugin. Actions run on a background task so an input confirmation never blocks Run. Installed by `integrations/install-powertoys-run.ps1` into the user's PowerToys Run plugin folder.
-- **Command Palette** (`CommandPalette`, net9.0-windows10.0.26100.0, SDK `Microsoft.CommandPalette.Extensions` 0.6 because Command Palette 0.7 is the host): an out-of-process COM server (`Shmuelie.WinRTServer`) declared in `AppxManifest.xml` as a `com.microsoft.commandpalette` app extension. Top-level commands are a searchable "dispcontrol" page (same commands as `dc`) and one command per preset. `install-command-palette.ps1` registers the build folder as a package, which needs Developer Mode; CsWinRT takes Windows metadata from the OS (`CsWinRTWindowsMetadata=local`), so no Windows SDK is required.
-- **Tests:** `Dispcontrol.Client.Tests` covers parsing and results over a fake daemon, the wire protocol against an in-process pipe server, and a cross-language contract test against the real `dispcontrold --demo` (runs when `DISPCONTROLD_EXE` is set, as in CI; otherwise reported as skipped). The adapters are humble and verified by hand.
+- **Command Palette** (`CommandPalette`, net9.0-windows10.0.26100.0, SDK `Microsoft.CommandPalette.Extensions` 0.6 because Command Palette 0.7 is the host): an out-of-process COM server (`Shmuelie.WinRTServer`) declared in `AppxManifest.xml` as a `com.microsoft.commandpalette` app extension. Top-level commands are a searchable "Dusk" page (same commands as `dusk`) and one command per preset. `install-command-palette.ps1` registers the build folder as a package, which needs Developer Mode; CsWinRT takes Windows metadata from the OS (`CsWinRTWindowsMetadata=local`), so no Windows SDK is required.
+- **Tests:** `Dusk.Client.Tests` covers parsing and results over a fake daemon, the wire protocol against an in-process pipe server, and a cross-language contract test against the real `duskd --demo` (runs when `DUSKD_EXE` is set, as in CI; otherwise reported as skipped). The adapters are humble and verified by hand.
 
 ### 9.7 Ubuntu (GNOME on Wayland)
-Reuses `domain`, `app`, `ipc`, `cli`, `store-file`. Adds `ddc-linux`. `dispcontrold` can run headless (scheduler + IPC) as a systemd user service. Hotkeys: XDG GlobalShortcuts portal where available, otherwise the user binds desktop shortcuts to CLI commands. Tray via StatusNotifierItem (needs the AppIndicator extension on GNOME); a Linux UI crate is a later plugin reusing `ui-model`.
+Reuses `domain`, `app`, `ipc`, `cli`, `store-file`. Adds `ddc-linux`. `duskd` can run headless (scheduler + IPC) as a systemd user service. Hotkeys: XDG GlobalShortcuts portal where available, otherwise the user binds desktop shortcuts to CLI commands. Tray via StatusNotifierItem (needs the AppIndicator extension on GNOME); a Linux UI crate is a later plugin reusing `ui-model`.
 
 ## 10. Cross-cutting concerns
 - **Errors:** typed in `domain`/`app`; mapped at the edges (exit codes, UI messages, JSON `error`). Errors never abort the engine; a failing monitor affects only that monitor (SPEC-NFR-4).
@@ -351,7 +351,7 @@ Every implementation change follows Clean Architecture and the test pyramid. Tes
 | Adapter/contract integration | Few | `ddc-windows`, `store-file`, `ipc`, `cli` | Test the adapter against its public port/protocol with narrow fixtures or local fakes. Keep real-hardware tests opt-in and explicitly gated; never make ordinary CI write to a monitor. |
 | System/UI/acceptance (tip) | Very few | composition roots and Windows UI | A small number of smoke checks exercise the assembled app. Hardware acceptance is a manual checklist on the reference display. Keep window procedures and OS calls as humble wrappers. |
 
-Where tests live: the `MonitorBackend` contract (`ddc_fake::contract`) runs against `FakeBackend` (also behind `TimedBackend`) in every build and against real monitors with `cargo test -p dispcontrol-ddc-windows -- --ignored` (reads only). OS-level checks that need a desktop are `#[ignore]`d and run explicitly (`cargo test -p dispcontrol-ui-win32 -- --ignored`). The end-to-end smoke test (`bin-daemon/tests/smoke.rs`) starts `dispcontrold --demo --background --config <temp>` on a private pipe (`DISPCONTROL_PIPE`) and drives it with the CLI; it needs no monitor.  `app` use-case tests are integration tests in `crates/app/tests/` (unit tests inside `app` cannot use `ddc-fake`, which links the non-test build of `app`); `ui-model` has unit tests for pure text/label rules in `src/text.rs` and view-model tests in `tests/`; `cli` tests run the real argument parsing against the daemon dispatcher through `run_with` and an in-process transport; `ipc` tests cover dispatch over fakes and real named-pipe round trips on private pipe names; `ui-win32` tests only its pure control-ID table (`modern/ids.rs`).
+Where tests live: the `MonitorBackend` contract (`ddc_fake::contract`) runs against `FakeBackend` (also behind `TimedBackend`) in every build and against real monitors with `cargo test -p dusk-ddc-windows -- --ignored` (reads only). OS-level checks that need a desktop are `#[ignore]`d and run explicitly (`cargo test -p dusk-ui-win32 -- --ignored`). The end-to-end smoke test (`bin-daemon/tests/smoke.rs`) starts `duskd --demo --background --config <temp>` on a private pipe (`DUSK_PIPE`) and drives it with the CLI; it needs no monitor.  `app` use-case tests are integration tests in `crates/app/tests/` (unit tests inside `app` cannot use `ddc-fake`, which links the non-test build of `app`); `ui-model` has unit tests for pure text/label rules in `src/text.rs` and view-model tests in `tests/`; `cli` tests run the real argument parsing against the daemon dispatcher through `run_with` and an in-process transport; `ipc` tests cover dispatch over fakes and real named-pipe round trips on private pipe names; `ui-win32` tests only its pure control-ID table (`modern/ids.rs`).
 
 Do not duplicate the same assertion at every layer. Put each rule at the lowest layer that owns it, then add only the integration checks needed to prove boundaries are wired correctly. Default CI runs the unit, use-case, and safe adapter suites; it excludes physical monitor writes.
 

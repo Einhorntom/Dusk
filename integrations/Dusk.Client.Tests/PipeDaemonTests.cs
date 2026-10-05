@@ -2,18 +2,18 @@ using System.Buffers.Binary;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json.Nodes;
-using Dispcontrol.Client;
+using Dusk.Client;
 using Xunit;
 
-namespace Dispcontrol.Client.Tests;
+namespace Dusk.Client.Tests;
 
 /// <summary>
 /// The wire protocol against an in-process pipe server that answers like
-/// dispcontrold (crates/ipc): length-prefixed JSON, one request per connection.
+/// duskd (crates/ipc): length-prefixed JSON, one request per connection.
 /// </summary>
 public class PipeDaemonTests
 {
-    private static string UniquePipe() => $"dispcontrol-client-test-{Guid.NewGuid():N}";
+    private static string UniquePipe() => $"dusk-client-test-{Guid.NewGuid():N}";
 
     /// <summary>Serves one connection: records the request and sends <paramref name="response"/>.</summary>
     private static Task<JsonNode> ServeOnce(string pipe, string response) =>

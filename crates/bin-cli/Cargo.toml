@@ -1,12 +1,12 @@
 [package]
-name = "dispcontrol-bin-cli"
+name = "dusk-bin-cli"
 version = "0.1.0"
 edition = "2024"
 publish = false
 
 [[bin]]
-name = "dispcontrol"
+name = "dusk"
 path = "src/main.rs"
 
 [dependencies]
-dispcontrol-cli = { path = "../cli" }
+dusk-cli = { path = "../cli" }

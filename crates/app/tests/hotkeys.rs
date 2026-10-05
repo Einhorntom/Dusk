@@ -2,11 +2,9 @@
 
 use std::time::Duration;
 
-use dispcontrol_app::{BackendError, HotkeyOutcome, UseCaseError};
-use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor, Harness, ScriptedPrompter};
-use dispcontrol_domain::{
-    ControlKey, DomainError, HotkeyAction, HotkeyBinding, Key, KeyCombo, MonitorId,
-};
+use dusk_app::{BackendError, HotkeyOutcome, UseCaseError};
+use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness, ScriptedPrompter};
+use dusk_domain::{ControlKey, DomainError, HotkeyAction, HotkeyBinding, Key, KeyCombo, MonitorId};
 
 fn keys(text: &str) -> KeyCombo {
     text.parse().unwrap()

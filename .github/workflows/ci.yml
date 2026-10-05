@@ -39,15 +39,15 @@ jobs:
         run: cargo build --workspace --bins
 
       # PowerToys integrations (C#). The client tests include a contract test
-      # against the dispcontrold built above, run with simulated monitors.
+      # against the duskd built above, run with simulated monitors.
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
 
       - name: Build integrations
-        run: dotnet build integrations/Dispcontrol.Integrations.sln -c Release -p:Platform=x64
+        run: dotnet build integrations/Dusk.Integrations.sln -c Release -p:Platform=x64
 
       - name: Test integrations
-        run: dotnet test integrations/Dispcontrol.Integrations.sln -c Release -p:Platform=x64 --no-build
+        run: dotnet test integrations/Dusk.Integrations.sln -c Release -p:Platform=x64 --no-build
         env:
-          DISPCONTROLD_EXE: ${{ github.workspace }}\target\debug\dispcontrold.exe
+          DUSKD_EXE: ${{ github.workspace }}\target\debug\duskd.exe

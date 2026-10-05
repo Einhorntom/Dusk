@@ -1,12 +1,12 @@
 [package]
-name = "dispcontrol-ui-model"
+name = "dusk-ui-model"
 version = "0.1.0"
 edition = "2024"
 publish = false
 
 [dependencies]
-dispcontrol-app = { path = "../app" }
-dispcontrol-domain = { path = "../domain" }
+dusk-app = { path = "../app" }
+dusk-domain = { path = "../domain" }
 
 [dev-dependencies]
-dispcontrol-ddc-fake = { path = "../ddc-fake" }
+dusk-ddc-fake = { path = "../ddc-fake" }

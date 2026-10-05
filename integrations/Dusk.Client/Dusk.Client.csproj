@@ -4,6 +4,6 @@
        No PowerToys dependency, so it is unit-tested on its own. -->
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
-    <RootNamespace>Dispcontrol.Client</RootNamespace>
+    <RootNamespace>Dusk.Client</RootNamespace>
   </PropertyGroup>
 </Project>

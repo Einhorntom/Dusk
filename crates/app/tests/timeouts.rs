@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dispcontrol_app::{BackendError, MonitorBackend, TimedBackend};
-use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor};
-use dispcontrol_domain::{ControlKey, MonitorId};
+use dusk_app::{BackendError, MonitorBackend, TimedBackend};
+use dusk_ddc_fake::{FakeBackend, FakeMonitor};
+use dusk_domain::{ControlKey, MonitorId};
 
 const TIMEOUT: Duration = Duration::from_millis(40);
 

@@ -4,8 +4,8 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use dispcontrol_app::{BackendError, HotkeyRepository, PresetRepository, SettingsRepository};
-use dispcontrol_domain::{
+use dusk_app::{BackendError, HotkeyRepository, PresetRepository, SettingsRepository};
+use dusk_domain::{
     AppSettings, ControlKey, ControlValue, HotkeyBinding, MonitorId, Preset, PresetEntry,
     validate_preset_name,
 };
@@ -26,12 +26,35 @@ impl FileSettingsRepository {
         }
     }
 
+    /// `%APPDATA%\Dusk\config.toml`.
     pub fn default_path() -> Result<PathBuf, BackendError> {
-        let root = std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .ok_or_else(|| BackendError::Failed("APPDATA is not set".into()))?;
-        Ok(root.join("dispcontrol").join("config.toml"))
+        Ok(app_data()?.join("Dusk").join("config.toml"))
     }
+
+    /// Where the file lived before the app was renamed to Dusk.
+    pub fn legacy_path() -> Result<PathBuf, BackendError> {
+        Ok(app_data()?.join("dispcontrol").join("config.toml"))
+    }
+
+    /// Copies the config file from `legacy` to `path` when `path` does not
+    /// exist yet, so settings, presets and hotkeys survive the rename. The
+    /// old file is kept. Returns whether it copied.
+    pub fn migrate_legacy(path: &Path, legacy: &Path) -> io::Result<bool> {
+        if path.exists() || !legacy.is_file() {
+            return Ok(false);
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(legacy, path)?;
+        Ok(true)
+    }
+}
+
+fn app_data() -> Result<PathBuf, BackendError> {
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .ok_or_else(|| BackendError::Failed("APPDATA is not set".into()))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -199,7 +222,7 @@ impl TryFrom<HotkeyFile> for HotkeyBinding {
     type Error = BackendError;
 
     fn try_from(file: HotkeyFile) -> Result<Self, Self::Error> {
-        let fail = |error: dispcontrol_domain::DomainError| {
+        let fail = |error: dusk_domain::DomainError| {
             BackendError::Failed(format!("hotkey '{}': {error}", file.keys))
         };
         Ok(Self {
@@ -355,9 +378,9 @@ struct PresetsDocument {
 }
 
 const EXPORT_HEADER: &str = "\
-# dispcontrol presets - edit freely, then import with `dispcontrol preset import <file>`.
+# Dusk presets - edit freely, then import with `dusk preset import <file>`.
 # Each [[presets]] block is one preset; each [[presets.entries]] block is one saved control.
-#   monitor: monitor id (see `dispcontrol list`)
+#   monitor: monitor id (see `dusk list`)
 #   control: brightness | contrast | volume | gain-red | gain-green | gain-blue |
 #            color-preset | input | power
 #   kind:    \"normalized\" (percent, 0-100) for brightness, contrast, volume and gains;
@@ -424,6 +447,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_pre_rename_config_is_copied_once_and_never_overwrites() {
+        let directory = std::env::temp_dir().join(format!(
+            "dusk-migrate-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let legacy = directory.join("dispcontrol").join("config.toml");
+        let path = directory.join("Dusk").join("config.toml");
+        assert!(!FileSettingsRepository::migrate_legacy(&path, &legacy).unwrap());
+
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, "# old settings\n").unwrap();
+        assert!(FileSettingsRepository::migrate_legacy(&path, &legacy).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "# old settings\n");
+        assert!(legacy.exists(), "the old file is kept");
+
+        fs::write(&path, "# new settings\n").unwrap();
+        assert!(!FileSettingsRepository::migrate_legacy(&path, &legacy).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "# new settings\n");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn settings_file_round_trips_defaults() {
         let original = AppSettings::default();
         let text = toml::to_string(&SettingsFile::from(original.clone())).unwrap();
@@ -434,7 +483,7 @@ mod tests {
     #[test]
     fn saving_replaces_existing_settings_and_keeps_backup() {
         let unique = format!(
-            "dispcontrol-settings-test-{}-{}",
+            "dusk-settings-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -462,7 +511,7 @@ mod tests {
     #[test]
     fn presets_round_trip_and_settings_and_presets_preserve_each_other() {
         let unique = format!(
-            "dispcontrol-presets-test-{}-{}",
+            "dusk-presets-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -506,7 +555,7 @@ mod tests {
     #[test]
     fn hotkeys_round_trip_and_every_section_survives_the_others_saves() {
         let directory = std::env::temp_dir().join(format!(
-            "dispcontrol-hotkeys-test-{}-{}",
+            "dusk-hotkeys-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -588,7 +637,7 @@ mod tests {
             }],
         }];
         let text = repository.export_text(&presets).unwrap();
-        assert!(text.starts_with("# dispcontrol presets"));
+        assert!(text.starts_with("# Dusk presets"));
         assert_eq!(repository.parse_text(&text).unwrap(), presets);
         assert!(repository.parse_text("version = 2").is_err());
         assert!(repository.parse_text("not toml [").is_err());

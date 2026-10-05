@@ -6,8 +6,8 @@
 
 use std::collections::HashSet;
 
-use dispcontrol_app::{BackendError, MonitorBackend};
-use dispcontrol_domain::{ControlKey, MonitorId};
+use dusk_app::{BackendError, MonitorBackend};
+use dusk_domain::{ControlKey, MonitorId};
 
 /// Panics with a description of the first broken rule.
 pub fn check_backend_contract(backend: &dyn MonitorBackend) {
@@ -15,7 +15,7 @@ pub fn check_backend_contract(backend: &dyn MonitorBackend) {
     let ids: HashSet<&MonitorId> = monitors.iter().map(|monitor| &monitor.id).collect();
     assert_eq!(ids.len(), monitors.len(), "monitor ids are unique");
 
-    let unknown = MonitorId::new("dispcontrol-contract-no-such-monitor").unwrap();
+    let unknown = MonitorId::new("dusk-contract-no-such-monitor").unwrap();
     assert!(
         matches!(
             backend.read_control(&unknown, ControlKey::Brightness),

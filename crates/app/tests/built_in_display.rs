@@ -3,9 +3,9 @@
 
 use std::time::Duration;
 
-use dispcontrol_app::{Clock, UseCaseError};
-use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor, Harness};
-use dispcontrol_domain::{ControlKey, ControlValue, MonitorId, Preset, PresetEntry};
+use dusk_app::{Clock, UseCaseError};
+use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
+use dusk_domain::{ControlKey, ControlValue, MonitorId, Preset, PresetEntry};
 
 fn id(text: &str) -> MonitorId {
     MonitorId::new(text).unwrap()

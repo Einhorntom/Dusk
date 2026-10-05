@@ -3,15 +3,15 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dispcontrol_app::{
+use dusk_app::{
     Clock, CompositeBackend, HotkeyRepository, MonitorBackend, MonitorService, PresetRepository,
     SettingsRepository, TimedBackend,
 };
-use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor};
-use dispcontrol_ddc_windows::WindowsDdcBackend;
-use dispcontrol_ipc::dispatch;
-use dispcontrol_panel_windows::PanelBackend;
-use dispcontrol_store_file::FileSettingsRepository;
+use dusk_ddc_fake::{FakeBackend, FakeMonitor};
+use dusk_ddc_windows::WindowsDdcBackend;
+use dusk_ipc::dispatch;
+use dusk_panel_windows::PanelBackend;
+use dusk_store_file::FileSettingsRepository;
 
 struct DesktopClock;
 
@@ -27,12 +27,12 @@ impl Clock for DesktopClock {
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("dispcontrold: {error}");
+        eprintln!("duskd: {error}");
         std::process::exit(1);
     }
 }
 
-const USAGE: &str = "usage: dispcontrold [--native-ui] [--background] [--demo] [--config <path>]";
+const USAGE: &str = "usage: duskd [--native-ui] [--background] [--demo] [--config <path>]";
 
 #[derive(Debug, Default, PartialEq)]
 struct Options {
@@ -68,7 +68,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let path = match options.config {
         Some(path) => path,
-        None => FileSettingsRepository::default_path()?,
+        None => {
+            let path = FileSettingsRepository::default_path()?;
+            // Settings, presets and hotkeys from before the rename to Dusk.
+            let legacy = FileSettingsRepository::legacy_path()?;
+            match FileSettingsRepository::migrate_legacy(&path, &legacy) {
+                Ok(true) => eprintln!(
+                    "duskd: copied settings from {} to {}",
+                    legacy.display(),
+                    path.display()
+                ),
+                Ok(false) => {}
+                Err(error) => eprintln!("duskd: could not copy old settings: {error}"),
+            }
+            path
+        }
     };
     // External monitors over DDC/CI plus the built-in display (SPEC-PNL).
     let monitors: Arc<dyn MonitorBackend> = if options.demo {
@@ -88,7 +102,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let settings: Arc<dyn SettingsRepository> = store.clone();
     let presets: Arc<dyn PresetRepository> = store.clone();
     let hotkeys: Arc<dyn HotkeyRepository> = store;
-    let prompter = Arc::new(dispcontrol_ui_win32::DesktopInputPrompter);
+    let prompter = Arc::new(dusk_ui_win32::DesktopInputPrompter);
     let service = Arc::new(MonitorService::new(
         backend,
         settings,
@@ -100,12 +114,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let request_service = service.clone();
     let _server = thread::spawn(move || {
         if let Err(error) =
-            dispcontrol_ipc::serve_forever(move |request| dispatch(&*request_service, request))
+            dusk_ipc::serve_forever(move |request| dispatch(&*request_service, request))
         {
-            eprintln!("dispcontrold IPC server stopped: {error}");
+            eprintln!("duskd IPC server stopped: {error}");
         }
     });
-    dispcontrol_ui_win32::run_with_options(service, options.native_ui, options.background)?;
+    dusk_ui_win32::run_with_options(service, options.native_ui, options.background)?;
     Ok(())
 }
 

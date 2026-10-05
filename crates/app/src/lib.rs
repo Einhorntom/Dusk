@@ -5,7 +5,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use dispcontrol_domain::{
+use dusk_domain::{
     AppSettings, ControlCapability, ControlKey, ControlReading, ControlValue, DomainError,
     HotkeyBinding, KeyCombo, Monitor, MonitorId, Preset, PresetEntry, RateLimiter, WriteBuffer,
     preset_names_equal, validate_preset_name,

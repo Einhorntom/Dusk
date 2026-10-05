@@ -22,11 +22,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR, w};
 
-use dispcontrol_app::Api;
-use dispcontrol_domain::{AppSettings, ControlReading, ControlValue};
-use dispcontrol_ui_model::MonitorSettingsModel;
+use dusk_app::Api;
+use dusk_domain::{AppSettings, ControlReading, ControlValue};
+use dusk_ui_model::MonitorSettingsModel;
 
-const WINDOW_CLASS: PCWSTR = w!("DispcontrolSettingsWindow");
+const WINDOW_CLASS: PCWSTR = w!("DuskSettingsWindow");
 const MONITOR_ID: u16 = 100;
 const CONTROL_ID: u16 = 101;
 const VALUE_ID: u16 = 102;
@@ -133,7 +133,7 @@ pub fn run_with_options(
         CreateWindowExW(
             Default::default(),
             WINDOW_CLASS,
-            w!("dispcontrol — Settings"),
+            w!("Dusk — Settings"),
             if start_hidden {
                 WS_OVERLAPPEDWINDOW
             } else {
@@ -517,7 +517,7 @@ fn add_tray_icon(context: &mut WindowContext) -> Result<(), String> {
         hIcon: icon,
         ..Default::default()
     };
-    let tooltip: Vec<u16> = "dispcontrol - Monitor Settings"
+    let tooltip: Vec<u16> = "Dusk - Monitor Settings"
         .encode_utf16()
         .take(data.szTip.len() - 1)
         .collect();

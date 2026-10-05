@@ -3,3 +3,6 @@
 # .NET build output (integrations/)
 bin/
 obj/
+
+# Python bytecode
+__pycache__/

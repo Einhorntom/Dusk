@@ -1,4 +1,4 @@
-# dispcontrol: Specification
+# Dusk: Specification
 
 Status: Draft v0.1. Derived from [PRD.md](./PRD.md) v0.4. Describes *what* the product does, precisely and testably. How it is built lives in [ARCH.md](./ARCH.md).
 The spec is monitor-model independent: nothing here hard-codes ranges, input names or capabilities of a specific monitor. Everything model-specific is discovered from the monitor at runtime (see section 2) or comes from optional quirk profiles (section 2.1). The Lenovo L32p-30 is the reference test hardware, not a spec dependency.
@@ -62,7 +62,7 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-WR-7: CLI `set` and preset apply are explicit user actions: they commit without the quiet period, but still follow SPEC-WR-4 and SPEC-WR-6.
 - SPEC-WR-8: Reads happen only on demand (opening the panel, `get`, `list`, after wake); no periodic polling.
 - SPEC-WR-9 (live preview): when enabled in settings (default **off**), during a drag the app MAY commit intermediate values at most 4 times per second per control. The final value is still committed per SPEC-WR-2. Enabling shows a one-time notice about wear risk and requires acknowledgment.
-- SPEC-WR-10 (audit): when enabled (default off), the app counts commits per monitor and control and exposes the totals in the settings view and via `dispcontrol audit`.
+- SPEC-WR-10 (audit): when enabled (default off), the app counts commits per monitor and control and exposes the totals in the settings view and via `dusk audit`.
 
 ## 5. Input switching safety
 - SPEC-IN-1: Changing `input` away from the currently active input MUST show a confirmation dialog by default. This covers the USB-C case: monitors that act as a USB hub disconnect their USB devices (e.g. keyboard, mouse) when the input changes, and the dialog says so. It applies to the panel, hotkeys, presets, schedule rules and CLI/integrations.
@@ -80,7 +80,7 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-PRE-4a: RGB gains belong to the monitor's user colour profiles (MCCS colour preset `0x0B`-`0x0D`), and writing a gain switches the monitor to one. When a preset selects any other colour preset for a monitor, its gain entries for that monitor are not captured, applied or compared (SPEC-PRE-7), and the editor marks them as not applied.
 - SPEC-PRE-5: Presets can be renamed, edited, deleted and reordered. Renaming a preset updates the hotkeys that apply it. Deleting a preset used by a hotkey asks for confirmation (Settings) or requires `--force` (CLI) and deletes those hotkeys too; deleting one used by a schedule rule follows the same rule in v2.
 - SPEC-PRE-5a: The stored values of a preset can be viewed and individually changed or removed (Settings "Edit" page; CLI `preset set|unset`).
-- SPEC-PRE-5b: Presets are stored in the app's config file (`%APPDATA%\dispcontrol\config.toml`; CLI `preset path`). They can be exported to and imported from a commented, human-editable TOML document (CLI `preset export [file]`, `preset import <file> [--replace]`; Settings exports/imports `dispcontrol-presets.toml` next to the config file). Import merges by name unless `--replace` is given, and rejects an invalid document without changing the stored presets.
+- SPEC-PRE-5b: Presets are stored in the app's config file (`%APPDATA%\Dusk\config.toml`; CLI `preset path`). They can be exported to and imported from a commented, human-editable TOML document (CLI `preset export [file]`, `preset import <file> [--replace]`; Settings exports/imports `dusk-presets.toml` next to the config file). Import merges by name unless `--replace` is given, and rejects an invalid document without changing the stored presets.
 - SPEC-PRE-6: "Cycle presets" applies the next preset in order, wrapping around; the starting point is the last applied preset or the first if none.
 - SPEC-PRE-7: The panel marks the preset whose values match the current monitor state, if any.
 
@@ -113,10 +113,10 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-UI-6: Settings include: hotkeys, step sizes, schedule rules, write delay, live preview, input confirmation and revert timer, on-screen indicator, start with Windows, audit log, monitor aliases.
 - SPEC-UI-7: The panel is fully keyboard-operable and exposes names/values to screen readers.
 - SPEC-UI-10 (v0 Settings): The default Settings window follows the visual design and interaction structure of `mockups/settings.html`, including a Windows 11-style navigation/sidebar, grouped content cards, monitor selection and controls, and safety/write settings. It shows only implemented features: discovered monitor selection and controls, quiet-period write setting, input-change confirmation, and input-revert timer. A Presets page (list with apply/rename/reorder/delete, save current with optional input source, current-match marker) is included from v1; a Hotkeys page (list with registration status and remove, add with a key-recording field, action and target monitor, per-control step sizes, on-screen indicator toggle) is included from v1; the Schedule page is omitted until implemented; unsupported controls are not displayed as available.
-- SPEC-UI-11 (Windows presentation fallback): `dispcontrold --native-ui` opens the original compact Win32 layout instead of the default grouped Settings layout. Both presentations use the same application API and behavior.
+- SPEC-UI-11 (Windows presentation fallback): `duskd --native-ui` opens the original compact Win32 layout instead of the default grouped Settings layout. Both presentations use the same application API and behavior.
 
 ## 10. Command line
-Executable: `dispcontrol`. Global flags: `--json`, `--monitor <id|alias|index>`, `--quiet`.
+Executable: `dusk`. Global flags: `--json`, `--monitor <id|alias|index>`, `--quiet`.
 
 | Command | Behavior |
 |---|---|
@@ -138,10 +138,10 @@ Exit codes: `0` success; `1` general error; `2` invalid usage or value; `3` moni
 - SPEC-CLI-3: Typical CLI latency to a monitor change is under 200 ms with the app running, excluding monitor latency.
 
 ## 11. Integrations
-- SPEC-INT-1 (PowerToys Run): keyword `dc` lists presets (select to apply) and parses `brightness 40`, `contrast 60`, `volume 20`, `input <name>`; results show the current value. Control words may be shortened to three letters (`bri 40`); words after the value filter monitors by name (`brightness 30 built-in`); with more than one matching monitor, a "… on all monitors" result comes first. Picking an input result asks for confirmation as usual (SPEC-IN-1); the current input is shown but not offered.
+- SPEC-INT-1 (PowerToys Run): keyword `dusk` lists presets (select to apply) and parses `brightness 40`, `contrast 60`, `volume 20`, `input <name>`; results show the current value. Control words may be shortened to three letters (`bri 40`); words after the value filter monitors by name (`brightness 30 built-in`); with more than one matching monitor, a "… on all monitors" result comes first. Picking an input result asks for confirmation as usual (SPEC-IN-1); the current input is shown but not offered.
 - SPEC-INT-2 (Command Palette): offers the same commands and presets; listing completes in under 300 ms with the app running. In addition, each preset is a top-level Command Palette command ("Apply monitor preset: <name>"), so typing its name in Command Palette finds it.
 - SPEC-INT-3: Integrations never bypass SPEC-IN-1 or SPEC-WR rules.
-- SPEC-INT-4 (optional): link `dispcontrol://preset/<name>` applies a preset.
+- SPEC-INT-4 (optional): link `dusk://preset/<name>` applies a preset.
 
 ## 12. Settings and data
 - SPEC-DAT-1: All settings, presets, rules and hotkeys live in one human-editable file in the user's profile; a file beside the executable enables portable mode. Hotkeys are stored as `[[hotkeys]]` entries with `keys` (e.g. `"Ctrl+Alt+Up"`), `action` (e.g. `"brightness+"`, `"preset:Night"`, `"input:0x11"`) and an optional `monitor`; step sizes and the indicator setting are top-level keys (`brightness_step`, `contrast_step`, `volume_step`, `show_osd`).

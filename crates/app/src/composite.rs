@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use dispcontrol_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
+use dusk_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
 
 use crate::{BackendError, MonitorBackend};
 

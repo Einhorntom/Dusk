@@ -14,37 +14,37 @@ import pathlib
 import subprocess
 import sys
 
-INNER = {"dispcontrol-domain", "dispcontrol-app"}
+INNER = {"dusk-domain", "dusk-app"}
 ANY = None  # composition roots and spikes may depend on anything
 
 # Allowed normal/build dependencies per crate (workspace and external).
 RULES = {
-    "dispcontrol-domain": set(),
-    "dispcontrol-app": {"dispcontrol-domain", "log"},
-    "dispcontrol-mccs": INNER,
-    "dispcontrol-ui-model": INNER,
-    "dispcontrol-ddc-fake": INNER,
+    "dusk-domain": set(),
+    "dusk-app": {"dusk-domain", "log"},
+    "dusk-mccs": INNER,
+    "dusk-ui-model": INNER,
+    "dusk-ddc-fake": INNER,
     # Exception (ARCH 5.3): `windows` for the Windows-only named-pipe transport.
-    "dispcontrol-ipc": INNER | {"serde", "serde_json", "windows"},
+    "dusk-ipc": INNER | {"serde", "serde_json", "windows"},
     # The CLI is a client of the daemon, so it reaches it through `ipc`.
-    "dispcontrol-cli": INNER | {"dispcontrol-ipc", "serde_json", "clap"},
-    "dispcontrol-ddc-windows": INNER | {"dispcontrol-mccs", "windows"},
-    "dispcontrol-panel-windows": INNER | {"windows"},
-    "dispcontrol-store-file": INNER | {"serde", "toml", "windows"},
-    "dispcontrol-ui-win32": INNER | {"dispcontrol-ui-model", "windows"},
-    "dispcontrol-bin-cli": ANY,
-    "dispcontrol-bin-daemon": ANY,
-    "dispcontrol-windows-ddc-spike": ANY,
+    "dusk-cli": INNER | {"dusk-ipc", "serde_json", "clap"},
+    "dusk-ddc-windows": INNER | {"dusk-mccs", "windows"},
+    "dusk-panel-windows": INNER | {"windows"},
+    "dusk-store-file": INNER | {"serde", "toml", "windows"},
+    "dusk-ui-win32": INNER | {"dusk-ui-model", "windows"},
+    "dusk-bin-cli": ANY,
+    "dusk-bin-daemon": ANY,
+    "dusk-windows-ddc-spike": ANY,
 }
 
 # Crates that must keep `#![forbid(unsafe_code)]` (ARCH section 12).
 FORBID_UNSAFE = [
-    "dispcontrol-domain",
-    "dispcontrol-app",
-    "dispcontrol-mccs",
-    "dispcontrol-ui-model",
-    "dispcontrol-cli",
-    "dispcontrol-ddc-fake",
+    "dusk-domain",
+    "dusk-app",
+    "dusk-mccs",
+    "dusk-ui-model",
+    "dusk-cli",
+    "dusk-ddc-fake",
 ]
 
 

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- PowerToys Command Palette extension (SPEC-INT-2): an out-of-process COM
        server that Command Palette starts on demand. A thin adapter over
-       Dispcontrol.Client. Installed by install-command-palette.ps1, which
+       Dusk.Client. Installed by install-command-palette.ps1, which
        registers AppxManifest.xml from the build folder (needs Developer Mode). -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -10,8 +10,8 @@
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <Platforms>x64;ARM64</Platforms>
     <PlatformTarget>$(Platform)</PlatformTarget>
-    <RootNamespace>Dispcontrol.CommandPalette</RootNamespace>
-    <AssemblyName>Dispcontrol.CommandPalette</AssemblyName>
+    <RootNamespace>Dusk.CommandPalette</RootNamespace>
+    <AssemblyName>Dusk.CommandPalette</AssemblyName>
     <!-- The generated WinRT interop code is not ours to analyze. -->
     <NoWarn>$(NoWarn);CA1515;CA1812</NoWarn>
     <!-- CsWinRT projects the extension SDK's WinRT types; take the Windows
@@ -25,7 +25,7 @@
     <PackageReference Include="Shmuelie.WinRTServer" Version="2.1.1" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Dispcontrol.Client\Dispcontrol.Client.csproj" />
+    <ProjectReference Include="..\Dusk.Client\Dusk.Client.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="AppxManifest.xml" CopyToOutputDirectory="PreserveNewest" />

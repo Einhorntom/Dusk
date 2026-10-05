@@ -55,9 +55,9 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn print_usage() {
     eprintln!(
-        "Usage:\n  dispcontrol-windows-ddc-spike list\n  \
-         dispcontrol-windows-ddc-spike read <monitor-index>\n  \
-         dispcontrol-windows-ddc-spike test-write <monitor-index> \
+        "Usage:\n  dusk-windows-ddc-spike list\n  \
+         dusk-windows-ddc-spike read <monitor-index>\n  \
+         dusk-windows-ddc-spike test-write <monitor-index> \
          <brightness|input|volume> <numeric-value>"
     );
 }

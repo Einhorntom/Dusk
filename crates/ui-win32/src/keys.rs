@@ -1,7 +1,7 @@
 //! Mapping between domain keys and Windows virtual-key codes and
 //! `RegisterHotKey` modifier flags. Pure, so it is unit-tested.
 
-use dispcontrol_domain::{Key, KeyCombo};
+use dusk_domain::{Key, KeyCombo};
 
 pub(crate) const MOD_ALT: u32 = 0x0001;
 pub(crate) const MOD_CONTROL: u32 = 0x0002;

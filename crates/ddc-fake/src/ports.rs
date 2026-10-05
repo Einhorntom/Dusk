@@ -3,11 +3,11 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use dispcontrol_app::{
+use dusk_app::{
     BackendError, Clock, HotkeyRepository, InputChangePrompter, PresetRepository,
     SettingsRepository,
 };
-use dispcontrol_domain::{AppSettings, HotkeyBinding, Monitor, Preset};
+use dusk_domain::{AppSettings, HotkeyBinding, Monitor, Preset};
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex

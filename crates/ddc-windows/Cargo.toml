@@ -1,13 +1,13 @@
 [package]
-name = "dispcontrol-ddc-windows"
+name = "dusk-ddc-windows"
 version = "0.1.0"
 edition = "2024"
 publish = false
 
 [dependencies]
-dispcontrol-app = { path = "../app" }
-dispcontrol-domain = { path = "../domain" }
-dispcontrol-mccs = { path = "../mccs" }
+dusk-app = { path = "../app" }
+dusk-domain = { path = "../domain" }
+dusk-mccs = { path = "../mccs" }
 windows = { version = "0.62", features = [
     "Win32_Devices_Display",
     "Win32_Foundation",
@@ -15,4 +15,4 @@ windows = { version = "0.62", features = [
 ] }
 
 [dev-dependencies]
-dispcontrol-ddc-fake = { path = "../ddc-fake" }
+dusk-ddc-fake = { path = "../ddc-fake" }

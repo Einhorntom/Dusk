@@ -20,10 +20,10 @@ use windows::core::{HRESULT, PCWSTR};
 
 use crate::{IpcError, MAX_MESSAGE_SIZE};
 
-const PIPE_NAME: &str = r"\\.\pipe\dispcontrol-v0";
+const PIPE_NAME: &str = r"\\.\pipe\dusk-v0";
 /// Overrides the pipe name for the daemon and the CLI alike, so a test or a
 /// second instance does not talk to the user's running daemon.
-pub const PIPE_ENV: &str = "DISPCONTROL_PIPE";
+pub const PIPE_ENV: &str = "DUSK_PIPE";
 
 fn pipe_name() -> String {
     match std::env::var(PIPE_ENV) {
@@ -75,7 +75,7 @@ pub(crate) fn serve_forever_on(
         }
         let handler = handler.clone();
         thread::Builder::new()
-            .name("dispcontrol-ipc-client".into())
+            .name("dusk-ipc-client".into())
             .spawn(move || {
                 let result = serve_connection(&mut pipe, handler.as_ref());
                 if let Err(error) = unsafe { DisconnectNamedPipe(HANDLE(pipe_handle as _)) } {

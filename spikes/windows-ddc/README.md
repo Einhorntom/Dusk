@@ -8,13 +8,13 @@ and control a monitor over DDC/CI on the reference PC.
 From the repository root, using the GNU toolchain installed for this probe:
 
 ```powershell
-cargo +stable-x86_64-pc-windows-gnu run -p dispcontrol-windows-ddc-spike --target x86_64-pc-windows-gnu -- list
-cargo +stable-x86_64-pc-windows-gnu run -p dispcontrol-windows-ddc-spike --target x86_64-pc-windows-gnu -- read 0
-cargo +stable-x86_64-pc-windows-gnu run -p dispcontrol-windows-ddc-spike --target x86_64-pc-windows-gnu -- test-write 0 brightness 99
+cargo +stable-x86_64-pc-windows-gnu run -p dusk-windows-ddc-spike --target x86_64-pc-windows-gnu -- list
+cargo +stable-x86_64-pc-windows-gnu run -p dusk-windows-ddc-spike --target x86_64-pc-windows-gnu -- read 0
+cargo +stable-x86_64-pc-windows-gnu run -p dusk-windows-ddc-spike --target x86_64-pc-windows-gnu -- test-write 0 brightness 99
 ```
 
 This setup also needs MinGW on `PATH`. With the MSVC linker installed, use
-`cargo run -p dispcontrol-windows-ddc-spike -- ...` instead.
+`cargo run -p dusk-windows-ddc-spike -- ...` instead.
 
 `list` enumerates physical displays and prints each raw MCCS capabilities
 string. `read` reads brightness (VCP `0x10`), input (VCP `0x60`) and volume

@@ -19,128 +19,128 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
-name = "dispcontrol-app"
+name = "dusk-app"
 version = "0.1.0"
 dependencies = [
- "dispcontrol-ddc-fake",
- "dispcontrol-domain",
+ "dusk-ddc-fake",
+ "dusk-domain",
 ]
 
 [[package]]
-name = "dispcontrol-bin-cli"
+name = "dusk-bin-cli"
 version = "0.1.0"
 dependencies = [
- "dispcontrol-cli",
+ "dusk-cli",
 ]
 
 [[package]]
-name = "dispcontrol-bin-daemon"
+name = "dusk-bin-daemon"
 version = "0.1.0"
 dependencies = [
- "dispcontrol-app",
- "dispcontrol-cli",
- "dispcontrol-ddc-fake",
- "dispcontrol-ddc-windows",
- "dispcontrol-ipc",
- "dispcontrol-panel-windows",
- "dispcontrol-store-file",
- "dispcontrol-ui-win32",
+ "dusk-app",
+ "dusk-cli",
+ "dusk-ddc-fake",
+ "dusk-ddc-windows",
+ "dusk-ipc",
+ "dusk-panel-windows",
+ "dusk-store-file",
+ "dusk-ui-win32",
  "embed-resource",
  "serde_json",
 ]
 
 [[package]]
-name = "dispcontrol-cli"
+name = "dusk-cli"
 version = "0.1.0"
 dependencies = [
- "dispcontrol-app",
- "dispcontrol-ddc-fake",
- "dispcontrol-domain",
- "dispcontrol-ipc",
+ "dusk-app",
+ "dusk-ddc-fake",
+ "dusk-domain",
+ "dusk-ipc",
  "serde_json",
 ]
 
 [[package]]
-name = "dispcontrol-ddc-fake"
+name = "dusk-ddc-fake"
 version = "0.1.0"
 dependencies = [
- "dispcontrol-app",
- "dispcontrol-domain",
+ "dusk-app",
+ "dusk-domain",
 ]
 
 [[package]]
-name = "dispcontrol-ddc-windows"
+name = "dusk-ddc-windows"
 version = "0.1.0"
 dependencies = [
- "dispcontrol-app",
- "dispcontrol-ddc-fake",
- "dispcontrol-domain",
- "dispcontrol-mccs",
+ "dusk-app",
+ "dusk-ddc-fake",
+ "dusk-domain",
+ "dusk-mccs",
  "windows",
 ]
 
 [[package]]
-name = "dispcontrol-domain"
+name = "dusk-domain"
 version = "0.1.0"
 
 [[package]]
-name = "dispcontrol-ipc"
+name = "dusk-ipc"
 version = "0.1.0"
 dependencies = [
- "dispcontrol-app",
- "dispcontrol-ddc-fake",
- "dispcontrol-domain",
+ "dusk-app",
+ "dusk-ddc-fake",
+ "dusk-domain",
  "serde",
  "serde_json",
  "windows",
 ]
 
 [[package]]
-name = "dispcontrol-mccs"
+name = "dusk-mccs"
 version = "0.1.0"
 
 [[package]]
-name = "dispcontrol-panel-windows"
+name = "dusk-panel-windows"
 version = "0.1.0"
 dependencies = [
- "dispcontrol-app",
- "dispcontrol-ddc-fake",
- "dispcontrol-domain",
+ "dusk-app",
+ "dusk-ddc-fake",
+ "dusk-domain",
  "windows",
 ]
 
 [[package]]
-name = "dispcontrol-store-file"
+name = "dusk-store-file"
 version = "0.1.0"
 dependencies = [
- "dispcontrol-app",
- "dispcontrol-domain",
+ "dusk-app",
+ "dusk-domain",
  "serde",
  "toml 0.8.23",
  "windows",
 ]
 
 [[package]]
-name = "dispcontrol-ui-model"
+name = "dusk-ui-model"
 version = "0.1.0"
 dependencies = [
- "dispcontrol-app",
- "dispcontrol-ddc-fake",
- "dispcontrol-domain",
+ "dusk-app",
+ "dusk-ddc-fake",
+ "dusk-domain",
 ]
 
 [[package]]
-name = "dispcontrol-ui-win32"
+name = "dusk-ui-win32"
 version = "0.1.0"
 dependencies = [
- "dispcontrol-app",
- "dispcontrol-domain",
- "dispcontrol-ui-model",
+ "dusk-app",
+ "dusk-domain",
+ "dusk-ui-model",
  "windows",
 ]
 
 [[package]]
-name = "dispcontrol-windows-ddc-spike"
+name = "dusk-windows-ddc-spike"
 version = "0.1.0"
 dependencies = [
  "windows",

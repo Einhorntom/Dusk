@@ -6,8 +6,8 @@
 use std::cell::RefCell;
 use std::mem::ManuallyDrop;
 
-use dispcontrol_app::{BackendError, MonitorBackend};
-use dispcontrol_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
+use dusk_app::{BackendError, MonitorBackend};
+use dusk_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
     CoSetProxyBlanket, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
@@ -283,7 +283,7 @@ mod tests {
     #[test]
     #[ignore = "reads the built-in display through WMI; run with --ignored"]
     fn panel_backend_meets_the_backend_contract() {
-        dispcontrol_ddc_fake::contract::check_backend_contract(&PanelBackend::new());
+        dusk_ddc_fake::contract::check_backend_contract(&PanelBackend::new());
     }
 
     /// Hardware check: changes the built-in display's brightness by one step

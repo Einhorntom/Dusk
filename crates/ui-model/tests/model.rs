@@ -2,9 +2,9 @@
 
 use std::time::Duration;
 
-use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor, Harness};
-use dispcontrol_domain::{ControlKey, ControlValue, MonitorId};
-use dispcontrol_ui_model::MonitorSettingsModel;
+use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
+use dusk_domain::{ControlKey, ControlValue, MonitorId};
+use dusk_ui_model::MonitorSettingsModel;
 
 fn model_with(monitors: Vec<FakeMonitor>) -> (MonitorSettingsModel, Harness) {
     let h = Harness::new(FakeBackend::new(monitors));
@@ -169,8 +169,8 @@ fn settings_updates_are_stored_and_kept_in_the_model() {
     assert_eq!(model.settings().debounce_ms, 400);
 }
 
-fn binding(keys: &str, action: &str) -> dispcontrol_domain::HotkeyBinding {
-    dispcontrol_domain::HotkeyBinding {
+fn binding(keys: &str, action: &str) -> dusk_domain::HotkeyBinding {
+    dusk_domain::HotkeyBinding {
         keys: keys.parse().unwrap(),
         action: action.parse().unwrap(),
         monitor: None,

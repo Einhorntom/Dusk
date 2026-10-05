@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- PowerToys Run plugin (SPEC-INT-1). A thin adapter over Dispcontrol.Client;
+  <!-- PowerToys Run plugin (SPEC-INT-1). A thin adapter over Dusk.Client;
        PowerToys 0.96 runs plugins on .NET 9. -->
   <PropertyGroup>
     <TargetFramework>net9.0-windows</TargetFramework>
@@ -7,15 +7,15 @@
     <Platforms>x64;ARM64</Platforms>
     <PlatformTarget>$(Platform)</PlatformTarget>
     <EnableDynamicLoading>true</EnableDynamicLoading>
-    <RootNamespace>Dispcontrol.PowerToysRun</RootNamespace>
-    <AssemblyName>Dispcontrol.PowerToysRun</AssemblyName>
+    <RootNamespace>Dusk.PowerToysRun</RootNamespace>
+    <AssemblyName>Dusk.PowerToysRun</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
     <!-- Wox.Plugin and friends, matching PowerToys 0.96.1 (see the target below). -->
     <PackageReference Include="Community.PowerToys.Run.Plugin.Dependencies" Version="0.96.1" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Dispcontrol.Client\Dispcontrol.Client.csproj" />
+    <ProjectReference Include="..\Dusk.Client\Dusk.Client.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="plugin.json" CopyToOutputDirectory="PreserveNewest" />

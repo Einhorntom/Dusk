@@ -1,19 +1,19 @@
 using System.Diagnostics;
-using Dispcontrol.Client;
+using Dusk.Client;
 using Xunit;
 
-namespace Dispcontrol.Client.Tests;
+namespace Dusk.Client.Tests;
 
-/// <summary>Runs only when DISPCONTROLD_EXE names a built dispcontrold; otherwise reported as skipped.</summary>
+/// <summary>Runs only when DUSKD_EXE names a built duskd; otherwise reported as skipped.</summary>
 public sealed class RealDaemonFactAttribute : FactAttribute
 {
-    public const string Variable = "DISPCONTROLD_EXE";
+    public const string Variable = "DUSKD_EXE";
 
     public RealDaemonFactAttribute()
     {
         if (!File.Exists(Environment.GetEnvironmentVariable(Variable)))
         {
-            Skip = $"set {Variable} to a built dispcontrold.exe to run against the real daemon";
+            Skip = $"set {Variable} to a built duskd.exe to run against the real daemon";
         }
     }
 }
@@ -24,8 +24,8 @@ public sealed class RealDaemonFactAttribute : FactAttribute
 /// </summary>
 public sealed class RealDaemonTests : IDisposable
 {
-    private readonly string pipe = $"dispcontrol-cs-contract-{Guid.NewGuid():N}";
-    private readonly string folder = Path.Combine(Path.GetTempPath(), $"dispcontrol-cs-contract-{Guid.NewGuid():N}");
+    private readonly string pipe = $"dusk-cs-contract-{Guid.NewGuid():N}";
+    private readonly string folder = Path.Combine(Path.GetTempPath(), $"dusk-cs-contract-{Guid.NewGuid():N}");
     private Process? process;
 
     private PipeDaemon StartDaemon()

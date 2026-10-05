@@ -1,7 +1,7 @@
-using Dispcontrol.Client;
+using Dusk.Client;
 using Xunit;
 
-namespace Dispcontrol.Client.Tests;
+namespace Dusk.Client.Tests;
 
 public class QueryParserTests
 {
@@ -47,7 +47,7 @@ public class ResultBuilderTests
     {
         var daemon = FakeDaemon.Laptop();
         var all = Results(daemon, "");
-        Assert.Equal(new[] { "Sunny day", "Night mode", "dispcontrol commands" }, all.Select(item => item.Title));
+        Assert.Equal(new[] { "Sunny day", "Night mode", "Dusk commands" }, all.Select(item => item.Title));
         var night = Assert.Single(Results(daemon, "NIGHT"));
         Assert.Equal(new ItemAction.ApplyPreset("Night mode"), night.Action);
 
@@ -139,9 +139,9 @@ public class ResultBuilderTests
         foreach (var search in new[] { "", "brightness 40", "input" })
         {
             var item = Assert.Single(Results(daemon, search));
-            Assert.Equal("dispcontrol is not running", item.Title);
+            Assert.Equal("Dusk is not running", item.Title);
             Assert.Null(item.Action);
         }
-        Assert.Equal("dispcontrol is not running", ActionRunner.Run(new ItemAction.ApplyPreset("Night mode"), daemon));
+        Assert.Equal("Dusk is not running", ActionRunner.Run(new ItemAction.ApplyPreset("Night mode"), daemon));
     }
 }

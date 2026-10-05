@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace Dispcontrol.Client;
+namespace Dusk.Client;
 
 /// <summary>What the user typed after the keyword (SPEC-INT-1).</summary>
 public abstract record Command
@@ -84,11 +84,11 @@ public static class ResultBuilder
         }
         catch (DaemonUnavailableException)
         {
-            return [new ResultItem("dispcontrol is not running", "Start dispcontrold to control your monitors.", null)];
+            return [new ResultItem("Dusk is not running", "Start duskd to control your monitors.", null)];
         }
         catch (DaemonException error)
         {
-            return [new ResultItem("dispcontrol could not answer", error.Message, null)];
+            return [new ResultItem("Dusk could not answer", error.Message, null)];
         }
     }
 
@@ -105,12 +105,12 @@ public static class ResultBuilder
         if (items.Count == 0)
         {
             items.Add(command.Filter.Length == 0
-                ? new ResultItem("No presets yet", "Save one in dispcontrol Settings. " + Usage, null)
+                ? new ResultItem("No presets yet", "Save one in Dusk Settings. " + Usage, null)
                 : new ResultItem($"No preset matches \"{command.Filter}\"", Usage, null));
         }
         else if (command.Filter.Length == 0)
         {
-            items.Add(new ResultItem("dispcontrol commands", Usage, null));
+            items.Add(new ResultItem("Dusk commands", Usage, null));
         }
         return items;
     }

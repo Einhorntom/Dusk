@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use dispcontrol_ui_model::text::Indicator;
+use dusk_ui_model::text::Indicator;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
@@ -90,14 +90,14 @@ fn create_window() -> Option<HWND> {
     let class = WNDCLASSW {
         lpfnWndProc: Some(window_proc),
         hInstance: HINSTANCE(instance.0),
-        lpszClassName: w!("DispcontrolIndicator"),
+        lpszClassName: w!("DuskIndicator"),
         ..Default::default()
     };
     unsafe {
         RegisterClassW(&class);
         let window = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT,
-            w!("DispcontrolIndicator"),
+            w!("DuskIndicator"),
             w!(""),
             WS_POPUP,
             0,

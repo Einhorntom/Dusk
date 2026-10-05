@@ -1,4 +1,4 @@
-//! End-to-end smoke test, the tip of the test pyramid: the real `dispcontrold`
+//! End-to-end smoke test, the tip of the test pyramid: the real `duskd`
 //! (simulated monitors, temporary config, private pipe, window hidden) driven
 //! by the real CLI over the named pipe. It needs no monitor and never touches
 //! the user's running daemon or settings.
@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-use dispcontrol_cli::{CliError, run};
+use dusk_cli::{CliError, run};
 use serde_json::Value;
 
 /// The daemon process and its config folder, cleaned up even if an assertion fails.
@@ -32,19 +32,19 @@ fn cli(args: &[&str]) -> Result<Value, CliError> {
 
 #[test]
 fn the_daemon_serves_cli_requests_end_to_end() {
-    let pipe = format!("dispcontrol-smoke-{}", std::process::id());
+    let pipe = format!("dusk-smoke-{}", std::process::id());
     let folder = std::env::temp_dir().join(&pipe);
     std::fs::create_dir_all(&folder).unwrap();
     let config = folder.join("config.toml");
-    let process = Command::new(env!("CARGO_BIN_EXE_dispcontrold"))
+    let process = Command::new(env!("CARGO_BIN_EXE_duskd"))
         .args(["--demo", "--background", "--config"])
         .arg(&config)
-        .env(dispcontrol_ipc::PIPE_ENV, &pipe)
+        .env(dusk_ipc::PIPE_ENV, &pipe)
         .spawn()
-        .expect("dispcontrold starts");
+        .expect("duskd starts");
     let _daemon = Daemon { process, folder };
     // SAFETY: this test binary runs no other test that reads the environment.
-    unsafe { std::env::set_var(dispcontrol_ipc::PIPE_ENV, &pipe) };
+    unsafe { std::env::set_var(dusk_ipc::PIPE_ENV, &pipe) };
 
     let deadline = Instant::now() + Duration::from_secs(20);
     let listed = loop {

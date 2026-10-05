@@ -6,9 +6,9 @@ use std::ffi::c_void;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Sender};
 
-use dispcontrol_app::{Api, HotkeyOutcome};
-use dispcontrol_domain::{HotkeyBinding, KeyCombo};
-use dispcontrol_ui_model::text::{Indicator, hotkey_action_label, hotkey_indicator};
+use dusk_app::{Api, HotkeyOutcome};
+use dusk_domain::{HotkeyBinding, KeyCombo};
+use dusk_ui_model::text::{Indicator, hotkey_action_label, hotkey_indicator};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, HOT_KEY_MODIFIERS, RegisterHotKey, UnregisterHotKey,
@@ -152,7 +152,7 @@ fn start_worker(window: HWND, api: Arc<dyn Api>) -> Sender<(KeyCombo, String)> {
     // HWND is not Send; the worker only posts messages to it.
     let window = window.0 as isize;
     let spawned = std::thread::Builder::new()
-        .name("dispcontrol-hotkeys".into())
+        .name("dusk-hotkeys".into())
         .spawn(move || {
             while let Ok((keys, label)) = jobs.recv() {
                 let result = api.run_hotkey(&keys).map_err(|error| error.to_string());

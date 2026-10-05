@@ -1,25 +1,25 @@
 [package]
-name = "dispcontrol-bin-daemon"
+name = "dusk-bin-daemon"
 version = "0.1.0"
 edition = "2024"
 publish = false
 
 [[bin]]
-name = "dispcontrold"
+name = "duskd"
 path = "src/main.rs"
 
 [build-dependencies]
 embed-resource = "3"
 
 [dependencies]
-dispcontrol-app = { path = "../app" }
-dispcontrol-ddc-fake = { path = "../ddc-fake" }
-dispcontrol-ddc-windows = { path = "../ddc-windows" }
-dispcontrol-panel-windows = { path = "../panel-windows" }
-dispcontrol-ipc = { path = "../ipc" }
-dispcontrol-store-file = { path = "../store-file" }
-dispcontrol-ui-win32 = { path = "../ui-win32" }
+dusk-app = { path = "../app" }
+dusk-ddc-fake = { path = "../ddc-fake" }
+dusk-ddc-windows = { path = "../ddc-windows" }
+dusk-panel-windows = { path = "../panel-windows" }
+dusk-ipc = { path = "../ipc" }
+dusk-store-file = { path = "../store-file" }
+dusk-ui-win32 = { path = "../ui-win32" }
 
 [dev-dependencies]
-dispcontrol-cli = { path = "../cli" }
+dusk-cli = { path = "../cli" }
 serde_json = "1"

@@ -2,7 +2,7 @@
 
 use std::ffi::c_void;
 
-use dispcontrol_domain::{AppSettings, ControlKey, ControlReading, ControlValue};
+use dusk_domain::{AppSettings, ControlKey, ControlReading, ControlValue};
 use windows::Win32::Foundation::{
     COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
 };
@@ -35,8 +35,8 @@ use windows::core::{BOOL, PCWSTR, w};
 mod ids;
 pub(crate) mod osd;
 
-use dispcontrol_domain::{HotkeyBinding, STEPPABLE_CONTROLS};
-use dispcontrol_ui_model::text::{
+use dusk_domain::{HotkeyBinding, STEPPABLE_CONTROLS};
+use dusk_ui_model::text::{
     apply_report_message, control_description, control_title, enum_label, exchange_path,
     hotkey_action_label, hotkey_description, import_summary_message, parse_entry_value,
     preset_entry_description, snap_debounce_ms, snap_revert_seconds,
@@ -48,7 +48,7 @@ use super::{
     set_status, wide_null,
 };
 
-const CONTENT_CLASS: PCWSTR = w!("DispcontrolSettingsContent");
+const CONTENT_CLASS: PCWSTR = w!("DuskSettingsContent");
 const EM_SETLIMITTEXT: u32 = 0x00C5;
 const SS_NOTIFY: u32 = 0x100;
 const WM_CTLCOLOREDIT: u32 = 0x0133;
@@ -1138,7 +1138,7 @@ fn build_presets(builder: &mut Builder<'_>) {
     if let Some(name) = builder.context.modern.editing_preset.clone() {
         if let Some(preset) = presets
             .iter()
-            .find(|preset| dispcontrol_domain::preset_names_equal(&preset.name, &name))
+            .find(|preset| dusk_domain::preset_names_equal(&preset.name, &name))
         {
             build_preset_detail(builder, preset);
             return;
@@ -1161,7 +1161,7 @@ fn build_presets(builder: &mut Builder<'_>) {
     for (index, preset) in presets.iter().enumerate().take(ROW_LIMIT) {
         let current = matching
             .as_deref()
-            .is_some_and(|name| dispcontrol_domain::preset_names_equal(name, &preset.name));
+            .is_some_and(|name| dusk_domain::preset_names_equal(name, &preset.name));
         let title = if current {
             format!("{}  (current)", preset.name)
         } else {
@@ -1256,7 +1256,7 @@ fn build_presets(builder: &mut Builder<'_>) {
     builder.card_end();
 }
 
-fn build_preset_detail(builder: &mut Builder<'_>, preset: &dispcontrol_domain::Preset) {
+fn build_preset_detail(builder: &mut Builder<'_>, preset: &dusk_domain::Preset) {
     use windows::Win32::UI::WindowsAndMessaging::{ES_AUTOHSCROLL, ES_NUMBER, ES_RIGHT, WS_BORDER};
     let gap = builder.px(6);
     builder.section(&format!("Settings stored in '{}'", preset.name));
@@ -1528,7 +1528,7 @@ fn build_general(builder: &mut Builder<'_>) {
     builder.section("About");
     builder.card_begin();
     builder.row(
-        concat!("dispcontrol ", env!("CARGO_PKG_VERSION")),
+        concat!("Dusk ", env!("CARGO_PKG_VERSION")),
         Some("Runs from the tray. Close or minimize hides the window; use Quit in the tray menu to exit."),
         0,
     );
@@ -2168,7 +2168,7 @@ fn preset_entry_action(context: &mut WindowContext, button: EntryButton, index: 
         .model
         .presets()
         .iter()
-        .find(|preset| dispcontrol_domain::preset_names_equal(&preset.name, &name))
+        .find(|preset| dusk_domain::preset_names_equal(&preset.name, &name))
         .and_then(|preset| preset.entries.get(index).cloned())
     else {
         return;
@@ -2186,7 +2186,7 @@ fn preset_entry_action(context: &mut WindowContext, button: EntryButton, index: 
             };
             let result = context
                 .model
-                .set_preset_entry(&name, dispcontrol_domain::PresetEntry { value, ..entry });
+                .set_preset_entry(&name, dusk_domain::PresetEntry { value, ..entry });
             if result.is_ok() {
                 set_status(context, &format!("Updated '{name}'."));
             }

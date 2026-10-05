@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use dispcontrol_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
+use dusk_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
 
 use crate::{BackendError, MonitorBackend};
 
@@ -85,8 +85,8 @@ impl TimedBackend {
             let (sender, jobs) = mpsc::channel::<Job>();
             let inner = self.inner.clone();
             let name = match key {
-                Some(monitor) => format!("dispcontrol-monitor-{monitor}"),
-                None => "dispcontrol-discovery".to_owned(),
+                Some(monitor) => format!("dusk-monitor-{monitor}"),
+                None => "dusk-discovery".to_owned(),
             };
             let spawned = thread::Builder::new().name(name).spawn(move || {
                 while let Ok(job) = jobs.recv() {

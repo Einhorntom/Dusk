@@ -1,13 +1,13 @@
 [package]
-name = "dispcontrol-app"
+name = "dusk-app"
 version = "0.1.0"
 edition = "2024"
 publish = false
 
 [dependencies]
-dispcontrol-domain = { path = "../domain" }
+dusk-domain = { path = "../domain" }
 
 [dev-dependencies]
 # Integration tests in tests/ only: unit tests cannot use it, because it
 # links the non-test build of this crate.
-dispcontrol-ddc-fake = { path = "../ddc-fake" }
+dusk-ddc-fake = { path = "../ddc-fake" }

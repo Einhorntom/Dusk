@@ -1,8 +1,8 @@
 //! SPEC-IN: input changes are confirmed and can be reverted.
 
-use dispcontrol_app::{EntryStatus, UseCaseError};
-use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor, Harness, ScriptedPrompter};
-use dispcontrol_domain::{ControlKey, ControlValue, MonitorId, Preset, PresetEntry};
+use dusk_app::{EntryStatus, UseCaseError};
+use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness, ScriptedPrompter};
+use dusk_domain::{ControlKey, ControlValue, MonitorId, Preset, PresetEntry};
 
 const HDMI: u32 = 0x11;
 const USB_C: u32 = 0x31;

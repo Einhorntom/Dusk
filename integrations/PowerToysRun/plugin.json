@@ -1,14 +1,14 @@
 {
   "ID": "6E1F3B9A0C4D4F2B9D7A5C8E2B1F4A3D",
-  "ActionKeyword": "dc",
+  "ActionKeyword": "dusk",
   "IsGlobal": false,
-  "Name": "dispcontrol",
-  "Author": "dispcontrol",
+  "Name": "Dusk",
+  "Author": "Dusk",
   "Version": "0.1.0",
   "Language": "csharp",
   "Website": "",
-  "ExecuteFileName": "Dispcontrol.PowerToysRun.dll",
-  "IcoPathDark": "Images\\dispcontrol.dark.png",
-  "IcoPathLight": "Images\\dispcontrol.light.png",
+  "ExecuteFileName": "Dusk.PowerToysRun.dll",
+  "IcoPathDark": "Images\\dusk.dark.png",
+  "IcoPathLight": "Images\\dusk.light.png",
   "DynamicLoading": true
 }

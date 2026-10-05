@@ -1,8 +1,8 @@
 //! SPEC-PRE: capture, apply, edit, import/export and matching of presets.
 
-use dispcontrol_app::{BackendError, COLOR_MODE_SETTLE, Clock, EntryStatus, UseCaseError};
-use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor, Harness};
-use dispcontrol_domain::{ControlKey, ControlValue, DomainError, MonitorId, Preset, PresetEntry};
+use dusk_app::{BackendError, COLOR_MODE_SETTLE, Clock, EntryStatus, UseCaseError};
+use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
+use dusk_domain::{ControlKey, ControlValue, DomainError, MonitorId, Preset, PresetEntry};
 
 const SIX_FIVE_K: u32 = 0x05;
 const SEVEN_FIVE_K: u32 = 0x06;

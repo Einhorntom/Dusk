@@ -3,17 +3,17 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dispcontrol.Client", "Dispcontrol.Client\Dispcontrol.Client.csproj", "{A719DA12-18FC-48F3-9973-B6ABBC7EE42A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dusk.Client", "Dusk.Client\Dusk.Client.csproj", "{A719DA12-18FC-48F3-9973-B6ABBC7EE42A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dispcontrol.Client.Tests", "Dispcontrol.Client.Tests\Dispcontrol.Client.Tests.csproj", "{3F52A3AD-EE81-41F3-B746-39BB05FAB3EF}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dusk.Client.Tests", "Dusk.Client.Tests\Dusk.Client.Tests.csproj", "{3F52A3AD-EE81-41F3-B746-39BB05FAB3EF}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "PowerToysRun", "PowerToysRun", "{AEB6D006-33EE-E5DE-72CE-C6A1D18DCF1A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dispcontrol.PowerToysRun", "PowerToysRun\Dispcontrol.PowerToysRun.csproj", "{B2D89B14-35A4-4E87-9C12-F9D55BCBD89F}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dusk.PowerToysRun", "PowerToysRun\Dusk.PowerToysRun.csproj", "{B2D89B14-35A4-4E87-9C12-F9D55BCBD89F}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "CommandPalette", "CommandPalette", "{0E5E0369-0982-B430-DEDF-E3055E389207}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dispcontrol.CommandPalette", "CommandPalette\Dispcontrol.CommandPalette.csproj", "{A0876CE6-071B-4C86-9823-5D5157305E07}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dusk.CommandPalette", "CommandPalette\Dusk.CommandPalette.csproj", "{A0876CE6-071B-4C86-9823-5D5157305E07}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
