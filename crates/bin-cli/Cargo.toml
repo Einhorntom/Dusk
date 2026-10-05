@@ -10,3 +10,6 @@ path = "src/main.rs"
 
 [dependencies]
 dusk-cli = { path = "../cli" }
+
+[build-dependencies]
+embed-resource = "3"

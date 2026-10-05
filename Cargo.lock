@@ -31,6 +31,7 @@ name = "dusk-bin-cli"
 version = "0.1.0"
 dependencies = [
  "dusk-cli",
+ "embed-resource",
 ]
 
 [[package]]
@@ -47,6 +48,7 @@ dependencies = [
  "dusk-ui-win32",
  "embed-resource",
  "serde_json",
+ "windows",
 ]
 
 [[package]]

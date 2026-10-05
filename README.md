@@ -1,5 +1,7 @@
 # Dusk
 
+<img src="assets/icons/dusk-256.png" width="96" height="96" alt="Dusk icon: a monitor showing a sunset">
+
 Control your monitors from the Windows tray. Switch between day and night setups in one keystroke, without reaching for the monitor's buttons.
 
 Dusk talks to external monitors over **DDC/CI** (the standard monitor-control channel in HDMI, DisplayPort and USB-C) and to a laptop's **built-in display** through Windows. It is a small Rust tray app with presets, global hotkeys, a command line, and PowerToys Run / Command Palette integration.
@@ -23,7 +25,7 @@ Dusk talks to external monitors over **DDC/CI** (the standard monitor-control ch
 
 - Windows 11 (x64).
 - A monitor with DDC/CI enabled (usually an on-screen menu option). Tested on a **Lenovo L32p-30** over USB-C with Intel Iris Xe graphics, plus that laptop's built-in display. Other monitors work through capability discovery but are not yet verified.
-- To build: Rust 1.88 or newer (edition 2024, let chains). For the PowerToys integrations: the .NET 9 SDK and PowerToys 0.96.
+- To build: Rust 1.88 or newer (edition 2024, let chains). Rust's default Windows toolchain (MSVC) needs the Visual Studio Build Tools with the C++ workload for its linker. Without them, use the GNU toolchain with MinGW-w64 on `PATH`: `rustup target add x86_64-pc-windows-gnu` and build with `cargo +stable-x86_64-pc-windows-gnu build --release --bins --target x86_64-pc-windows-gnu`. For the PowerToys integrations: the .NET 9 SDK and PowerToys 0.96.
 
 ## Build and run
 

@@ -12,13 +12,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, BM_GETCHECK, BM_SETCHECK, BS_AUTOCHECKBOX, CB_ADDSTRING, CB_GETCURSEL,
     CB_SETCURSEL, CBN_SELCHANGE, CBS_DROPDOWNLIST, CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW,
     DestroyMenu, DestroyWindow, DispatchMessageW, ES_AUTOHSCROLL, ES_NUMBER, GetCursorPos,
-    GetMessageW, GetWindowTextW, HMENU, IDI_APPLICATION, IsDialogMessageW, KillTimer, LoadIconW,
-    MF_STRING, MSG, PostQuitMessage, RegisterClassW, SC_MINIMIZE, SW_HIDE, SW_SHOW,
+    GetMessageW, GetWindowTextW, HMENU, ICON_SMALL, IsDialogMessageW, KillTimer, MF_STRING, MSG,
+    PostQuitMessage, RegisterClassW, SC_MINIMIZE, SW_HIDE, SW_SHOW,
     SendMessageW as send_message_raw, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
     SetWindowTextW, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage,
     WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORSTATIC, WM_DESTROY,
-    WM_DRAWITEM, WM_ERASEBKGND, WM_HSCROLL, WM_NCCREATE, WM_SETTINGCHANGE, WM_SIZE, WM_SYSCOMMAND,
-    WM_TIMER, WNDCLASSW, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+    WM_DRAWITEM, WM_ERASEBKGND, WM_HSCROLL, WM_NCCREATE, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE,
+    WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -48,6 +48,7 @@ const MENU_SETTINGS: usize = 200;
 const MENU_QUIT: usize = 201;
 
 mod hotkeys;
+mod icons;
 mod keys;
 mod modern;
 mod prompts;
@@ -92,10 +93,12 @@ pub fn run_with_options(
 ) -> Result<(), String> {
     let instance = unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None) }
         .map_err(|error| error.to_string())?;
+    let (large_icon, small_icon) = icons::app_icons();
     let class = WNDCLASSW {
         lpfnWndProc: Some(window_proc),
         hInstance: HINSTANCE(instance.0),
         lpszClassName: WINDOW_CLASS,
+        hIcon: large_icon,
         ..Default::default()
     };
     if unsafe { RegisterClassW(&class) } == 0 {
@@ -152,6 +155,12 @@ pub fn run_with_options(
     .map_err(|error| format!("CreateWindowExW failed: {error}"))?;
     context.window = window;
     unsafe {
+        let _ = SendMessageW(
+            window,
+            WM_SETICON,
+            WPARAM(ICON_SMALL as usize),
+            LPARAM(small_icon.0 as isize),
+        );
         if native_ui {
             let dark_mode = BOOL(1);
             let _ = DwmSetWindowAttribute(
@@ -249,6 +258,9 @@ unsafe extern "system" fn window_proc(
         if message == hotkeys::RECORDING_MESSAGE {
             hotkeys::on_recording(context, wparam.0 != 0);
             return LRESULT(0);
+        }
+        if message == WM_SETTINGCHANGE {
+            update_tray_icon(context);
         }
         if message == WM_CLOSE {
             unsafe {
@@ -506,8 +518,7 @@ fn create_native_controls(context: &mut WindowContext) -> Result<(), String> {
 }
 
 fn add_tray_icon(context: &mut WindowContext) -> Result<(), String> {
-    let icon = unsafe { LoadIconW(None, IDI_APPLICATION) }
-        .map_err(|error| format!("LoadIconW failed: {error}"))?;
+    let icon = icons::tray();
     let mut data = NOTIFYICONDATAW {
         cbSize: size_of::<NOTIFYICONDATAW>() as u32,
         hWnd: context.window,
@@ -527,6 +538,23 @@ fn add_tray_icon(context: &mut WindowContext) -> Result<(), String> {
     }
     context.tray_icon = Some(data);
     Ok(())
+}
+
+/// Swaps the tray glyph when the taskbar switches between light and dark.
+fn update_tray_icon(context: &mut WindowContext) {
+    let Some(data) = context.tray_icon.as_mut() else {
+        return;
+    };
+    let icon = icons::tray();
+    if icon == data.hIcon {
+        return;
+    }
+    data.hIcon = icon;
+    let mut update = *data;
+    update.uFlags = NIF_ICON;
+    unsafe {
+        let _ = Shell_NotifyIconW(NIM_MODIFY, &update);
+    }
 }
 
 /// Shows a tray notification, for problems the user must see even while the

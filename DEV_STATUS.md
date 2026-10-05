@@ -21,6 +21,8 @@ Both Settings presentations use the same view model and application API. The def
 
 **Renamed to Dusk (2026-10-05):** executables `dusk` (CLI) and `duskd` (daemon), crates `dusk-*`, pipe `dusk-v0` (`DUSK_PIPE`), settings in `%APPDATA%\Dusk\config.toml`, PowerToys Run keyword `dusk`, C# projects `Dusk.*`, Command Palette package `Dusk.CommandPalette` (new COM class ID). On first start `duskd` copies `%APPDATA%\dispcontrol\config.toml` if the new file does not exist (the old file is kept); the install scripts remove the old PowerToys Run plugin folder and Command Palette package.
 
+**Icons (2026-10-05):** "Screen at dusk" (a monitor whose screen shows the sun setting). `assets/icons/make_icons.py` (Python standard library only) generates the multi-size app icon embedded in `duskd.exe` and `dusk.exe`, pixel-snapped tray glyphs for 16-32 px (white for dark taskbars, black for light; the tray icon follows the taskbar theme and updates on `WM_SETTINGCHANGE`), and the PowerToys Run and Command Palette images. A test checks that `duskd.exe` carries the icon resources.
+
 ## Known gaps
 
 - Settings-window actions (Apply preset, Refresh, value changes) still run on the UI thread; since `TimedBackend` they are bounded by the SPEC-MON-4 timeout (up to about 6 s for a hung monitor) instead of hanging. Hotkeys and IPC requests are not affected.
