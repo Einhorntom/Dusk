@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- PowerToys Run plugin (SPEC-INT-1). A thin adapter over Dispcontrol.Client;
+       PowerToys 0.96 runs plugins on .NET 9. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Platforms>x64;ARM64</Platforms>
+    <PlatformTarget>$(Platform)</PlatformTarget>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RootNamespace>Dispcontrol.PowerToysRun</RootNamespace>
+    <AssemblyName>Dispcontrol.PowerToysRun</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Wox.Plugin and friends, matching PowerToys 0.96.1 (see the target below). -->
+    <PackageReference Include="Community.PowerToys.Run.Plugin.Dependencies" Version="0.96.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Dispcontrol.Client\Dispcontrol.Client.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="plugin.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Images\*.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <!-- The package references PowerToys' own assemblies and also copies them to
+       the output (its PowerToysLibs items). PowerToys loads its own copies, so
+       never ship them next to the plugin. -->
+  <Target Name="DoNotShipPowerToysAssemblies" AfterTargets="ResolveAssemblyReferences" BeforeTargets="GetCopyToOutputDirectoryItems">
+    <ItemGroup>
+      <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)" Condition="$([System.String]::Copy('%(Filename)').StartsWith('Wox.')) Or $([System.String]::Copy('%(Filename)').StartsWith('PowerToys.'))" />
+      <ContentWithTargetPath Remove="@(PowerToysLibs)" />
+    </ItemGroup>
+  </Target>
+</Project>

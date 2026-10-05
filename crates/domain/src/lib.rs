@@ -92,6 +92,36 @@ impl ControlKey {
     pub fn is_numeric(self) -> bool {
         !matches!(self, Self::Input | Self::ColorPreset | Self::Power)
     }
+
+    /// Canonical name of an enumerated value (SPEC-CTL-4), or `None` for a
+    /// value without a standard name.
+    pub fn value_name(self, value: u32) -> Option<&'static str> {
+        match (self, value) {
+            (Self::Input, 0x0F) => Some("DisplayPort 1"),
+            (Self::Input, 0x10) => Some("DisplayPort 2"),
+            (Self::Input, 0x11) => Some("HDMI 1"),
+            (Self::Input, 0x12) => Some("HDMI 2"),
+            (Self::Input, 0x1B | 0x31) => Some("USB-C"),
+            (Self::ColorPreset, 0x01) => Some("sRGB"),
+            (Self::ColorPreset, 0x02) => Some("Native"),
+            (Self::ColorPreset, 0x03) => Some("4000 K"),
+            (Self::ColorPreset, 0x04) => Some("5000 K"),
+            (Self::ColorPreset, 0x05) => Some("6500 K"),
+            (Self::ColorPreset, 0x06) => Some("7500 K"),
+            (Self::ColorPreset, 0x07) => Some("8200 K"),
+            (Self::ColorPreset, 0x08) => Some("9300 K"),
+            (Self::ColorPreset, 0x09) => Some("10000 K"),
+            (Self::ColorPreset, 0x0B) => Some("User 1"),
+            (Self::ColorPreset, 0x0C) => Some("User 2"),
+            (Self::ColorPreset, 0x0D) => Some("User 3"),
+            (Self::Power, 0x01) => Some("On"),
+            (Self::Power, 0x02) => Some("Standby"),
+            (Self::Power, 0x03) => Some("Suspend"),
+            (Self::Power, 0x04) => Some("Off (soft)"),
+            (Self::Power, 0x05) => Some("Off (hard)"),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ControlKey {

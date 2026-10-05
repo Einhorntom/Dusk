@@ -37,33 +37,7 @@ pub fn control_description(key: ControlKey) -> Option<&'static str> {
 
 /// Human name for an enumerated control value; unknown values show as raw hex.
 pub fn enum_label(key: ControlKey, value: u32) -> String {
-    let named = match (key, value) {
-        (ControlKey::Input, 0x0F) => Some("DisplayPort 1"),
-        (ControlKey::Input, 0x10) => Some("DisplayPort 2"),
-        (ControlKey::Input, 0x11) => Some("HDMI 1"),
-        (ControlKey::Input, 0x12) => Some("HDMI 2"),
-        (ControlKey::Input, 0x1B) => Some("USB-C"),
-        (ControlKey::Input, 0x31) => Some("USB-C"),
-        (ControlKey::ColorPreset, 0x01) => Some("sRGB"),
-        (ControlKey::ColorPreset, 0x02) => Some("Native"),
-        (ControlKey::ColorPreset, 0x03) => Some("4000 K"),
-        (ControlKey::ColorPreset, 0x04) => Some("5000 K"),
-        (ControlKey::ColorPreset, 0x05) => Some("6500 K"),
-        (ControlKey::ColorPreset, 0x06) => Some("7500 K"),
-        (ControlKey::ColorPreset, 0x07) => Some("8200 K"),
-        (ControlKey::ColorPreset, 0x08) => Some("9300 K"),
-        (ControlKey::ColorPreset, 0x09) => Some("10000 K"),
-        (ControlKey::ColorPreset, 0x0B) => Some("User 1"),
-        (ControlKey::ColorPreset, 0x0C) => Some("User 2"),
-        (ControlKey::ColorPreset, 0x0D) => Some("User 3"),
-        (ControlKey::Power, 0x01) => Some("On"),
-        (ControlKey::Power, 0x02) => Some("Standby"),
-        (ControlKey::Power, 0x03) => Some("Suspend"),
-        (ControlKey::Power, 0x04) => Some("Off (soft)"),
-        (ControlKey::Power, 0x05) => Some("Off (hard)"),
-        _ => None,
-    };
-    match (named, key) {
+    match (key.value_name(value), key) {
         (Some(name), ControlKey::Input) => format!("{name} (raw-0x{value:02X})"),
         (Some(name), _) => name.to_owned(),
         (None, _) => format!("raw-0x{value:02X}"),

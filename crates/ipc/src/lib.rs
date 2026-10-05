@@ -206,9 +206,14 @@ struct MonitorDto {
 struct ReadingDto {
     control: String,
     value: String,
+    /// Canonical name of an enum value (SPEC-CTL-4), if it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value_name: Option<&'static str>,
     native_min: u32,
     native_max: u32,
     enum_values: Vec<u32>,
+    /// Canonical names of `enum_values`, `null` where a value has none.
+    enum_names: Vec<Option<&'static str>>,
 }
 
 #[derive(Serialize)]
@@ -271,16 +276,24 @@ fn dispatch_inner(service: &dyn Api, input: &[u8]) -> Result<serde_json::Value, 
             let reading = service
                 .read(&monitor, control)
                 .map_err(DispatchError::from_use_case)?;
-            let value = match reading.value {
-                ControlValue::Normalized(value) => value.to_string(),
-                ControlValue::Enum(value) => value.to_string(),
+            let (value, value_name) = match reading.value {
+                ControlValue::Normalized(value) => (value.to_string(), None),
+                ControlValue::Enum(value) => (value.to_string(), control.value_name(value)),
             };
+            let enum_names = reading
+                .capability
+                .enum_values
+                .iter()
+                .map(|value| control.value_name(*value))
+                .collect();
             serde_json::to_value(ReadingDto {
                 control: control.to_string(),
                 value,
+                value_name,
                 native_min: reading.capability.native_min,
                 native_max: reading.capability.native_max,
                 enum_values: reading.capability.enum_values,
+                enum_names,
             })
             .map_err(|error| DispatchError::new(1, error.to_string()))
         }
@@ -713,6 +726,24 @@ mod tests {
         assert_eq!(deleted["result"]["hotkeys_removed"], 1);
         assert!(h.presets.stored().is_empty());
         assert!(h.hotkeys.stored().is_empty());
+    }
+
+    #[test]
+    fn readings_carry_canonical_value_names() {
+        let h = Harness::new(FakeBackend::single(FakeMonitor::reference("m")));
+        let input = call(
+            &h.service,
+            r#"{"op":"get","monitor":"m","control":"input"}"#,
+        );
+        assert_eq!(input["result"]["value"], "49");
+        assert_eq!(input["result"]["value_name"], "USB-C");
+        assert_eq!(input["result"]["enum_values"][1], 0x11);
+        assert_eq!(input["result"]["enum_names"][1], "HDMI 1");
+        let brightness = call(
+            &h.service,
+            r#"{"op":"get","monitor":"m","control":"brightness"}"#,
+        );
+        assert!(brightness["result"].get("value_name").is_none());
     }
 
     #[test]

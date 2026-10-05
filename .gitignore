@@ -1,1 +1,5 @@
 /target/
+
+# .NET build output (integrations/)
+bin/
+obj/

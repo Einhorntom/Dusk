@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Shared by the PowerToys Run plugin and the Command Palette extension:
+       the daemon's IPC protocol, query parsing and result building.
+       No PowerToys dependency, so it is unit-tested on its own. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Dispcontrol.Client</RootNamespace>
+  </PropertyGroup>
+</Project>
