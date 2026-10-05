@@ -41,7 +41,7 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-MON-1: Each monitor has a stable ID derived from model and serial number. If unavailable, fall back to model + connection position and flag as "unstable ID".
 - SPEC-MON-2: Monitors are addressable by ID, by a user-assigned alias, or by index in the CLI.
 - SPEC-MON-3: The app MUST detect monitor connect/disconnect and wake from sleep, and refresh its monitor list within 3 seconds.
-- SPEC-MON-4: A command to a monitor that does not answer MUST time out (default 2 s, with up to 3 attempts) and report "not responding". It MUST NOT block other monitors, the UI, or hotkeys. A display that Windows cannot open for DDC/CI (such as a laptop panel) is left out of the DDC/CI monitor list instead of making the listing fail; the built-in display is listed through section 3.1 instead.
+- SPEC-MON-4: A command to a monitor that does not answer MUST time out (default 2 s, with up to 3 attempts) and report "not responding". It MUST NOT block other monitors, the UI, or hotkeys. A display that Windows cannot open for DDC/CI is left out of the DDC/CI monitor list instead of making the listing fail. A display shown only on a built-in panel is never listed through DDC/CI, even when Windows can open it; it is listed through section 3.1 instead. A display duplicated onto an external monitor stays listed, for that monitor.
 - SPEC-MON-5: Any monitor that supports the standard monitor-control interface is supported through discovery (section 2). Monitors that were not verified by the project are labeled "unverified" in the UI and `list` output; a project-maintained list records verified models (initially the L32p-30).
 
 ### 3.1 Built-in display

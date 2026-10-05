@@ -37,7 +37,7 @@ Both Settings presentations use the same view model and application API. The def
 
 1. All v1 features are implemented: presets and global hotkeys (both accepted by the owner), built-in display brightness (SPEC section 3.1) and the PowerToys integrations (SPEC-INT-1/2; PowerToys Run and Command Palette accepted by the owner). Next: v1 acceptance items below, then v2 schedules.
 2. Acceptance of the built-in display on the reference laptop is pending: it appears as "Built-in display" on the Monitors page with a brightness slider only; presets capture/apply it; brightness hotkeys on "All monitors" move both displays; held keys and fast slider moves on it are never deferred; closing the lid removes it without errors. Verified so far: WMI read and write round trip on the reference panel (42 % -> 41 % -> 42 %), and the real daemon listing both displays.
-3. With only the laptop panel connected, monitor listing used to fail with "Element not found"; displays that cannot be opened are now skipped. To confirm on hardware: unplug the L32p-30, run `dusk list` (expect an empty list, exit 0), reconnect.
+3. With only the laptop panel connected, monitor listing used to fail with "Element not found"; displays that cannot be opened are now skipped. Later, with only the panel connected, Windows opened it for DDC/CI and it was listed twice (its DDC/CI description and "Built-in display"); DDC/CI now skips displays whose only outputs are built-in (Windows output technology internal/embedded). To confirm on hardware: unplug the L32p-30, run `dusk list` (expect only "Built-in display", exit 0), reconnect (expect both).
 
 ## Release plan and version scope
 
