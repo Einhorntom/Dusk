@@ -114,8 +114,10 @@ dispcontrol/
     bin-cli/           `dispcontrol` executable (composition root)     (layer 4)
     bin-daemon/        `dispcontrold` executable (composition root)    (layer 4)
   integrations/
-    powertoys-run/     C# plugin (thin pipe client)
-    cmdpal/            C# Command Palette extension (thin pipe client)
+    Dispcontrol.Client/      C# pipe client, "dc" query parsing, results (shared)
+    Dispcontrol.Client.Tests/
+    PowerToysRun/            PowerToys Run plugin (thin adapter)
+    CommandPalette/          Command Palette extension (thin adapter, COM server)
   quirks/              per-model quirk profiles (data)
   mockups/  docs/
 ```
@@ -321,6 +323,12 @@ Presenter and controller for the command line: parses arguments, calls `Api`, re
 
 ### 9.6 PowerToys integrations (`integrations/`)
 Thin C# clients of the IPC protocol (they hold no rules): PowerToys Run plugin (keyword `dc`) and a Command Palette extension. If the daemon is not running they show an "app not running" error and do nothing else. They cannot bypass input confirmation or write protection because those are enforced in the engine (SPEC-INT-3).
+
+**As implemented:**
+- **`Dispcontrol.Client`** (net9.0, no PowerToys dependency): `PipeDaemon` speaks the IPC protocol (length-prefixed JSON, `DISPCONTROL_PIPE` override); `QueryParser` turns the typed text into a command; `ResultBuilder` turns a command plus daemon state into result items with an optional action; `ActionRunner` runs an action. Both PowerToys adapters only map these items to their own types. Enum names come from the daemon (`value_name`, `enum_names` from `ControlKey::value_name`), so no table is duplicated in C#.
+- **PowerToys Run** (`PowerToysRun`, net9.0-windows, like PowerToys 0.96): compiled against `Community.PowerToys.Run.Plugin.Dependencies` 0.96.1; PowerToys' own assemblies are not shipped with the plugin. Actions run on a background task so an input confirmation never blocks Run. Installed by `integrations/install-powertoys-run.ps1` into the user's PowerToys Run plugin folder.
+- **Command Palette** (`CommandPalette`, net9.0-windows10.0.26100.0, SDK `Microsoft.CommandPalette.Extensions` 0.6 because Command Palette 0.7 is the host): an out-of-process COM server (`Shmuelie.WinRTServer`) declared in `AppxManifest.xml` as a `com.microsoft.commandpalette` app extension. Top-level commands are a searchable "dispcontrol" page (same commands as `dc`) and one command per preset. `install-command-palette.ps1` registers the build folder as a package, which needs Developer Mode; CsWinRT takes Windows metadata from the OS (`CsWinRTWindowsMetadata=local`), so no Windows SDK is required.
+- **Tests:** `Dispcontrol.Client.Tests` covers parsing and results over a fake daemon, the wire protocol against an in-process pipe server, and a cross-language contract test against the real `dispcontrold --demo` (runs when `DISPCONTROLD_EXE` is set, as in CI; otherwise reported as skipped). The adapters are humble and verified by hand.
 
 ### 9.7 Ubuntu (GNOME on Wayland)
 Reuses `domain`, `app`, `ipc`, `cli`, `store-file`. Adds `ddc-linux`. `dispcontrold` can run headless (scheduler + IPC) as a systemd user service. Hotkeys: XDG GlobalShortcuts portal where available, otherwise the user binds desktop shortcuts to CLI commands. Tray via StatusNotifierItem (needs the AppIndicator extension on GNOME); a Linux UI crate is a later plugin reusing `ui-model`.

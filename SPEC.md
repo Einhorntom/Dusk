@@ -138,8 +138,8 @@ Exit codes: `0` success; `1` general error; `2` invalid usage or value; `3` moni
 - SPEC-CLI-3: Typical CLI latency to a monitor change is under 200 ms with the app running, excluding monitor latency.
 
 ## 11. Integrations
-- SPEC-INT-1 (PowerToys Run): keyword `dc` lists presets (select to apply) and parses `brightness 40`, `contrast 60`, `volume 20`, `input <name>`; results show the current value.
-- SPEC-INT-2 (Command Palette): offers the same commands and presets; listing completes in under 300 ms with the app running.
+- SPEC-INT-1 (PowerToys Run): keyword `dc` lists presets (select to apply) and parses `brightness 40`, `contrast 60`, `volume 20`, `input <name>`; results show the current value. Control words may be shortened to three letters (`bri 40`); words after the value filter monitors by name (`brightness 30 built-in`); with more than one matching monitor, a "… on all monitors" result comes first. Picking an input result asks for confirmation as usual (SPEC-IN-1); the current input is shown but not offered.
+- SPEC-INT-2 (Command Palette): offers the same commands and presets; listing completes in under 300 ms with the app running. In addition, each preset is a top-level Command Palette command ("Apply monitor preset: <name>"), so typing its name in Command Palette finds it.
 - SPEC-INT-3: Integrations never bypass SPEC-IN-1 or SPEC-WR rules.
 - SPEC-INT-4 (optional): link `dispcontrol://preset/<name>` applies a preset.
 

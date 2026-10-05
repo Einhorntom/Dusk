@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- PowerToys Command Palette extension (SPEC-INT-2): an out-of-process COM
+       server that Command Palette starts on demand. A thin adapter over
+       Dispcontrol.Client. Installed by install-command-palette.ps1, which
+       registers AppxManifest.xml from the build folder (needs Developer Mode). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- 26100: the toolkit is built against Microsoft.Windows.SDK.NET 10.0.26100. -->
+    <TargetFramework>net9.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <Platforms>x64;ARM64</Platforms>
+    <PlatformTarget>$(Platform)</PlatformTarget>
+    <RootNamespace>Dispcontrol.CommandPalette</RootNamespace>
+    <AssemblyName>Dispcontrol.CommandPalette</AssemblyName>
+    <!-- The generated WinRT interop code is not ours to analyze. -->
+    <NoWarn>$(NoWarn);CA1515;CA1812</NoWarn>
+    <!-- CsWinRT projects the extension SDK's WinRT types; take the Windows
+         metadata from the OS (System32\WinMetadata), so no Windows SDK install is needed. -->
+    <CsWinRTWindowsMetadata>local</CsWinRTWindowsMetadata>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 0.6 is the newest SDK not newer than Command Palette 0.7 (PowerToys 0.96). -->
+    <PackageReference Include="Microsoft.CommandPalette.Extensions" Version="0.6.251022008" />
+    <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.2.0" />
+    <PackageReference Include="Shmuelie.WinRTServer" Version="2.1.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Dispcontrol.Client\Dispcontrol.Client.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="AppxManifest.xml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Assets\*.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Public\README.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
