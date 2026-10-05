@@ -50,6 +50,9 @@ const MENU_QUIT: usize = 201;
 mod hotkeys;
 mod keys;
 mod modern;
+mod prompts;
+
+pub use prompts::DesktopInputPrompter;
 
 const WM_HOTKEY: u32 = 0x0312;
 
@@ -69,6 +72,7 @@ struct WindowContext {
     window: HWND,
     tray_icon: Option<NOTIFYICONDATAW>,
     hotkeys: hotkeys::Registrar,
+    hotkey_runner: hotkeys::Runner,
 }
 
 pub fn run(api: Arc<dyn Api>) -> Result<(), String> {
@@ -76,6 +80,16 @@ pub fn run(api: Arc<dyn Api>) -> Result<(), String> {
 }
 
 pub fn run_with_native_ui(api: Arc<dyn Api>, native_ui: bool) -> Result<(), String> {
+    run_with_options(api, native_ui, false)
+}
+
+/// Runs the tray app. With `start_hidden`, the Settings window stays hidden
+/// until opened from the tray (e.g. when started with Windows).
+pub fn run_with_options(
+    api: Arc<dyn Api>,
+    native_ui: bool,
+    start_hidden: bool,
+) -> Result<(), String> {
     let instance = unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None) }
         .map_err(|error| error.to_string())?;
     let class = WNDCLASSW {
@@ -112,6 +126,7 @@ pub fn run_with_native_ui(api: Arc<dyn Api>, native_ui: bool) -> Result<(), Stri
         window: HWND::default(),
         tray_icon: None,
         hotkeys: hotkeys::Registrar::default(),
+        hotkey_runner: hotkeys::Runner::default(),
     });
     let context_ptr = (&mut *context) as *mut WindowContext;
     let window = unsafe {
@@ -119,7 +134,11 @@ pub fn run_with_native_ui(api: Arc<dyn Api>, native_ui: bool) -> Result<(), Stri
             Default::default(),
             WINDOW_CLASS,
             w!("dispcontrol — Settings"),
-            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            if start_hidden {
+                WS_OVERLAPPEDWINDOW
+            } else {
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE
+            },
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             window_width,
@@ -142,7 +161,10 @@ pub fn run_with_native_ui(api: Arc<dyn Api>, native_ui: bool) -> Result<(), Stri
                 std::mem::size_of::<BOOL>() as u32,
             );
         }
-        let _ = ShowWindow(window, SW_SHOW);
+        if !start_hidden || context.tray_icon.is_none() {
+            // Without a tray icon the window is the only way back in.
+            let _ = ShowWindow(window, SW_SHOW);
+        }
     }
 
     let mut message = MSG::default();
@@ -189,10 +211,12 @@ unsafe extern "system" fn window_proc(
         if let Err(error) = create_controls(context) {
             eprintln!("could not create Settings controls: {error}");
             unsafe { PostQuitMessage(1) };
-        } else if let Err(error) = add_tray_icon(context) {
-            eprintln!("could not add tray icon: {error}");
-            unsafe { PostQuitMessage(1) };
         } else {
+            // Without a taskbar (e.g. Explorer not running) the app still
+            // works; the window stays visible instead.
+            if let Err(error) = add_tray_icon(context) {
+                eprintln!("warning: could not add tray icon: {error}");
+            }
             refresh(context);
             hotkeys::register(context);
         }
@@ -216,6 +240,10 @@ unsafe extern "system" fn window_proc(
         }
         if message == WM_HOTKEY {
             hotkeys::on_hotkey(context, wparam.0 as i32);
+            return LRESULT(0);
+        }
+        if message == hotkeys::FINISHED_MESSAGE {
+            hotkeys::on_hotkey_finished(context, lparam);
             return LRESULT(0);
         }
         if message == hotkeys::RECORDING_MESSAGE {

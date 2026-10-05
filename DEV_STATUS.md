@@ -21,6 +21,9 @@ Both Settings presentations use the same view model and application API. The def
 
 ## Known gaps
 
+- Settings-window actions (Apply preset, Refresh, value changes) still run on the UI thread; since `TimedBackend` they are bounded by the SPEC-MON-4 timeout (up to about 6 s for a hung monitor) instead of hanging. Hotkeys and IPC requests are not affected.
+- Hardware quirks (colour-mode settle time, power-off modes, input `0x31` = USB-C) are still constants in code; a quirk profile (SPEC-QRK) is planned for the second monitor model or the Ubuntu work.
+
 - Input and volume behaviour was verified manually by the owner on the reference monitor (v0 acceptance); automated CI intentionally does not switch physical inputs.
 - Slider writes still read back after the buffered write; apply the same no-read-back approach if a DDC/CI read error appears right after a write.
 - Light theme, other display scales and a formal keyboard/accessibility review were not exhaustively covered by the v0 acceptance.
@@ -29,7 +32,8 @@ Both Settings presentations use the same view model and application API. The def
 ## Next implementation steps
 
 1. v1 presets (accepted) and global hotkeys are implemented. Next: PowerToys Run / Command Palette integrations.
-2. Supervised acceptance of hotkeys on the reference setup is pending: the Hotkeys page (recording field, action/monitor menus, remove, step sliders, indicator toggle), held step keys (one write after release), preset/next/prev and input hotkeys (confirmation dialog), power-toggle (does the L32p-30 still answer DDC/CI in soft off?), conflict reporting (tray notification) and the on-screen indicator in light and dark mode.
+2. With only the laptop panel connected, monitor listing used to fail with "Element not found"; displays that cannot be opened are now skipped. To confirm on hardware: unplug the L32p-30, run `dispcontrol list` (expect an empty list, exit 0), reconnect.
+3. Supervised acceptance of hotkeys on the reference setup is pending: the Hotkeys page (recording field, action/monitor menus, remove, step sliders, indicator toggle), held step keys (one write after release), preset/next/prev and input hotkeys (confirmation dialog), power-toggle (does the L32p-30 still answer DDC/CI in soft off?), conflict reporting (tray notification) and the on-screen indicator in light and dark mode.
 
 ## Release plan and version scope
 
@@ -90,7 +94,8 @@ Latest recorded verification for the Windows GNU target:
 - `cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings`
 - `cargo build --workspace --bins --target x86_64-pc-windows-gnu`
 - `python scripts/check_layers.py` (dependency rule, ARCH.md 5.3)
-- 131 workspace tests pass (including hotkey domain parsing, use cases over `ddc-fake`, TOML round trips, view-model and indicator text, virtual-key mapping, and a real `RegisterHotKey` conflict check on message-only windows). Use-case tests (`crates/app/tests/`: write policy, input safety, presets incl. import/export, multi-monitor and failure cases) run on the shared `ddc-fake` crate; `ui-model` covers labels, value snapping, messages and view-model behaviour; the CLI is tested end to end against the daemon dispatcher (exit codes 2/3/5/7, export/import files); `ipc` includes real named-pipe round trips (max-size message, 8 concurrent clients, missing server); `ui-win32` checks that every control ID decodes back to its own control with no collisions.
+- Opt-in: `cargo test -p dispcontrol-ddc-windows -- --ignored` (backend contract against the real monitor, read-only; passes on the reference L32p-30) and `cargo test -p dispcontrol-ui-win32 -- --ignored` (real `RegisterHotKey` conflict check; passes on the reference desktop).
+- 145 workspace tests pass (plus the 2 opt-in tests above). The suite was reviewed for Clean Architecture and the test pyramid on 2026-10-05: write policy moved into `domain` as pure state machines with unit tests, `TimedBackend` added for SPEC-MON-4, the `Api` split into `ControlApi`/`SettingsApi`/`PresetApi`/`HotkeyApi`, settings validation unified in `AppSettings::validate`, the input prompter moved into `ui-win32`, hotkey form logic moved into `ui-model`, a duplicated cross-layer assertion removed, a shared backend contract and a daemon smoke test added. Earlier: 131 (including hotkey domain parsing, use cases over `ddc-fake`, TOML round trips, view-model and indicator text, virtual-key mapping, and a real `RegisterHotKey` conflict check on message-only windows). Use-case tests (`crates/app/tests/`: write policy, input safety, presets incl. import/export, multi-monitor and failure cases) run on the shared `ddc-fake` crate; `ui-model` covers labels, value snapping, messages and view-model behaviour; the CLI is tested end to end against the daemon dispatcher (exit codes 2/3/5/7, export/import files); `ipc` includes real named-pipe round trips (max-size message, 8 concurrent clients, missing server); `ui-win32` checks that every control ID decodes back to its own control with no collisions.
 - Runtime smoke checks: CLI reports exit code 7 with a JSON error when the daemon is absent; with the daemon running, monitor listing, brightness read, settings JSON, 20 sequential requests, and 20 concurrent CLI/IPC requests succeeded. The default window opened at 880x720; `--native-ui` opened at 760x640; both served CLI requests. Closing the Settings window hid it without stopping the daemon, and the tray-icon left-click message restored it. An invalid daemon argument exits with code 1.
 
 No physical monitor input switch was performed during these checks. Manual acceptance of tray behavior (including Quit), settings persistence, input confirmation/revert and the colour-preset fix was completed by the owner on the reference setup; v0 is accepted.

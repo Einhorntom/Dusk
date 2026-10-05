@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use dispcontrol_app::{BackendError, MonitorBackend, MonitorService};
 use dispcontrol_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
 
+pub mod contract;
 pub mod ports;
 
 pub use ports::{ManualClock, MemoryHotkeys, MemoryPresets, MemorySettings, ScriptedPrompter};
@@ -100,6 +101,7 @@ struct State {
     writes: Vec<Write>,
     failing_reads: HashMap<(MonitorId, ControlKey), BackendError>,
     failing_writes: HashMap<(MonitorId, ControlKey), BackendError>,
+    hung: HashSet<MonitorId>,
 }
 
 /// `MonitorBackend` over simulated monitors.
@@ -189,6 +191,23 @@ impl FakeBackend {
             .insert((monitor.clone(), control), error);
     }
 
+    /// Makes every read and write on the monitor block until `release`, like
+    /// a display that stops answering DDC/CI (SPEC-MON-4).
+    pub fn hang(&self, monitor: &MonitorId) {
+        self.state().hung.insert(monitor.clone());
+    }
+
+    pub fn release(&self, monitor: &MonitorId) {
+        self.state().hung.remove(monitor);
+    }
+
+    /// Blocks while the monitor is hung, without holding the state lock.
+    fn wait_while_hung(&self, monitor: &MonitorId) {
+        while self.state().hung.contains(monitor) {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
     /// Hides the monitor from discovery, as if its cable were unplugged.
     pub fn disconnect(&self, monitor: &MonitorId) {
         self.state().disconnected.insert(monitor.clone());
@@ -219,6 +238,7 @@ impl MonitorBackend for FakeBackend {
         monitor: &MonitorId,
         control: ControlKey,
     ) -> Result<Option<(ControlCapability, u32)>, BackendError> {
+        self.wait_while_hung(monitor);
         let state = self.state();
         if state.disconnected.contains(monitor) {
             return Err(not_found(monitor));
@@ -240,6 +260,7 @@ impl MonitorBackend for FakeBackend {
         control: ControlKey,
         native_value: u32,
     ) -> Result<(), BackendError> {
+        self.wait_while_hung(monitor);
         let mut state = self.state();
         if state.disconnected.contains(monitor) {
             return Err(not_found(monitor));
@@ -315,6 +336,22 @@ impl Harness {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_fake_meets_the_backend_contract_directly_and_with_timeouts() {
+        let backend = Arc::new(FakeBackend::new([
+            FakeMonitor::reference("full"),
+            FakeMonitor::new("bare").numeric(ControlKey::Brightness, 30, 100),
+        ]));
+        contract::check_backend_contract(backend.as_ref());
+        let timed = dispcontrol_app::TimedBackend::new(
+            backend.clone(),
+            std::time::Duration::from_secs(1),
+            1,
+        );
+        contract::check_backend_contract(&timed);
+        assert!(backend.writes().is_empty());
+    }
 
     #[test]
     fn backend_reports_like_the_real_adapter() {

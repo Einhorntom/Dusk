@@ -1,25 +1,16 @@
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use dispcontrol_app::{
-    Clock, HotkeyRepository, InputChangePrompter, MonitorService, PresetRepository,
-    SettingsRepository,
+    Clock, HotkeyRepository, MonitorBackend, MonitorService, PresetRepository, SettingsRepository,
+    TimedBackend,
 };
+use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor};
 use dispcontrol_ddc_windows::WindowsDdcBackend;
-use dispcontrol_domain::Monitor;
 use dispcontrol_ipc::dispatch;
 use dispcontrol_store_file::FileSettingsRepository;
-use windows::Win32::Foundation::{LPARAM, WPARAM};
-use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, GetWindowThreadProcessId, IDNO, IDYES, MB_DEFBUTTON2, MB_ICONWARNING, MB_YESNO,
-    MessageBoxW, SendMessageW, WM_COMMAND,
-};
-use windows::core::PCWSTR;
-
-struct DesktopInputPrompter;
 
 struct DesktopClock;
 
@@ -33,103 +24,6 @@ impl Clock for DesktopClock {
     }
 }
 
-impl InputChangePrompter for DesktopInputPrompter {
-    fn confirm_input_change(&self, monitor: &Monitor, from: u32, to: u32) -> bool {
-        let text = wide_null(&format!(
-            "Changing this input may disconnect devices connected to the monitor's USB hub or leave the display without a picture. The previous input might not be restorable if the monitor stops responding to this PC.\n\nMonitor: {}\nInput: {} -> {}\n\nContinue?",
-            monitor.name, from, to
-        ));
-        let title = wide_null("Confirm monitor input change");
-        unsafe {
-            MessageBoxW(
-                None,
-                PCWSTR(text.as_ptr()),
-                PCWSTR(title.as_ptr()),
-                MB_YESNO | MB_ICONWARNING,
-            ) == IDYES
-        }
-    }
-
-    fn confirm_keep_input(
-        &self,
-        monitor: &Monitor,
-        previous_input: u32,
-        new_input: u32,
-        timeout_seconds: u32,
-    ) -> Result<bool, String> {
-        let title = wide_null(&format!("Keep input - {}", monitor.name));
-        let content = wide_null(&format!(
-            "Input changed from {previous_input} to {new_input}.\n\nSelect Yes to keep it or No to restore the previous input. It will revert automatically in {timeout_seconds} seconds."
-        ));
-        let owner_thread = unsafe { GetCurrentThreadId() };
-        let completed = Arc::new(Mutex::new(false));
-        let timer_completed = completed.clone();
-        let timer_title = title.clone();
-        let timer = thread::Builder::new()
-            .name("dispcontrol-input-revert".into())
-            .spawn(move || {
-                let deadline = Instant::now() + Duration::from_secs(timeout_seconds.into());
-                loop {
-                    let Ok(done) = timer_completed.lock() else {
-                        return;
-                    };
-                    if *done {
-                        return;
-                    }
-                    drop(done);
-                    if Instant::now() >= deadline {
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(50));
-                }
-
-                loop {
-                    let Ok(mut done) = timer_completed.lock() else {
-                        return;
-                    };
-                    if *done {
-                        return;
-                    }
-                    if let Ok(window) = unsafe { FindWindowW(None, PCWSTR(timer_title.as_ptr())) }
-                        && unsafe { GetWindowThreadProcessId(window, None) } == owner_thread
-                    {
-                        unsafe {
-                            let _ = SendMessageW(
-                                window,
-                                WM_COMMAND,
-                                Some(WPARAM(IDNO.0 as usize)),
-                                Some(LPARAM(0)),
-                            );
-                        }
-                        *done = true;
-                        return;
-                    }
-                    drop(done);
-                    thread::sleep(Duration::from_millis(50));
-                }
-            })
-            .map_err(|error| format!("could not start input revert timer: {error}"))?;
-        let response = unsafe {
-            MessageBoxW(
-                None,
-                PCWSTR(content.as_ptr()),
-                PCWSTR(title.as_ptr()),
-                MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2,
-            )
-        };
-        {
-            let mut done = completed
-                .lock()
-                .map_err(|_| "input revert timer state is unavailable".to_owned())?;
-            *done = true;
-        }
-        timer
-            .join()
-            .map_err(|_| "input revert timer stopped unexpectedly".to_owned())?;
-        Ok(response == IDYES)
-    }
-}
-
 fn main() {
     if let Err(error) = run() {
         eprintln!("dispcontrold: {error}");
@@ -137,23 +31,56 @@ fn main() {
     }
 }
 
+const USAGE: &str = "usage: dispcontrold [--native-ui] [--background] [--demo] [--config <path>]";
+
+#[derive(Debug, Default, PartialEq)]
+struct Options {
+    native_ui: bool,
+    /// Start in the tray without showing Settings.
+    background: bool,
+    /// Simulated monitors instead of real ones (demos and the smoke test).
+    demo: bool,
+    config: Option<PathBuf>,
+}
+
+fn parse_options(arguments: &[String]) -> Result<Options, String> {
+    let mut options = Options::default();
+    let mut arguments = arguments.iter();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--native-ui" => options.native_ui = true,
+            "--background" => options.background = true,
+            "--demo" => options.demo = true,
+            "--config" => {
+                let path = arguments.next().ok_or(USAGE)?;
+                options.config = Some(PathBuf::from(path));
+            }
+            _ => return Err(USAGE.into()),
+        }
+    }
+    Ok(options)
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-    let native_ui = match arguments.as_slice() {
-        [] => false,
-        [argument] if argument == "--native-ui" => true,
-        _ => {
-            return Err("usage: dispcontrold [--native-ui]".into());
-        }
-    };
+    let options = parse_options(&arguments)?;
 
-    let path = FileSettingsRepository::default_path()?;
-    let backend = Arc::new(WindowsDdcBackend::new());
+    let path = match options.config {
+        Some(path) => path,
+        None => FileSettingsRepository::default_path()?,
+    };
+    let monitors: Arc<dyn MonitorBackend> = if options.demo {
+        Arc::new(FakeBackend::single(FakeMonitor::reference("Demo-monitor")))
+    } else {
+        Arc::new(WindowsDdcBackend::new())
+    };
+    // Every DDC/CI call runs on a per-monitor worker with a timeout (SPEC-MON-4).
+    let backend = Arc::new(TimedBackend::with_defaults(monitors));
     let store = Arc::new(FileSettingsRepository::new(path));
     let settings: Arc<dyn SettingsRepository> = store.clone();
     let presets: Arc<dyn PresetRepository> = store.clone();
     let hotkeys: Arc<dyn HotkeyRepository> = store;
-    let prompter = Arc::new(DesktopInputPrompter);
+    let prompter = Arc::new(dispcontrol_ui_win32::DesktopInputPrompter);
     let service = Arc::new(MonitorService::new(
         backend,
         settings,
@@ -165,15 +92,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let request_service = service.clone();
     let _server = thread::spawn(move || {
         if let Err(error) =
-            dispcontrol_ipc::serve_forever(move |request| dispatch(&request_service, request))
+            dispcontrol_ipc::serve_forever(move |request| dispatch(&*request_service, request))
         {
             eprintln!("dispcontrold IPC server stopped: {error}");
         }
     });
-    dispcontrol_ui_win32::run_with_native_ui(service, native_ui)?;
+    dispcontrol_ui_win32::run_with_options(service, options.native_ui, options.background)?;
     Ok(())
 }
 
-fn wide_null(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(std::iter::once(0)).collect()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(arguments: &[&str]) -> Result<Options, String> {
+        let arguments: Vec<String> = arguments.iter().map(|item| item.to_string()).collect();
+        parse_options(&arguments)
+    }
+
+    #[test]
+    fn options_parse_in_any_order_and_reject_unknown_ones() {
+        assert_eq!(parse(&[]).unwrap(), Options::default());
+        let options = parse(&["--background", "--config", "c.toml", "--demo"]).unwrap();
+        assert!(options.background && options.demo && !options.native_ui);
+        assert_eq!(options.config, Some(PathBuf::from("c.toml")));
+        assert!(parse(&["--config"]).is_err());
+        assert!(parse(&["--verbose"]).is_err());
+    }
 }

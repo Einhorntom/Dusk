@@ -35,11 +35,11 @@ use windows::core::{BOOL, PCWSTR, w};
 mod ids;
 pub(crate) mod osd;
 
-use dispcontrol_domain::{HotkeyAction, HotkeyBinding, KeyCombo, STEPPABLE_CONTROLS};
+use dispcontrol_domain::{HotkeyBinding, STEPPABLE_CONTROLS};
 use dispcontrol_ui_model::text::{
     apply_report_message, control_description, control_title, enum_label, exchange_path,
-    hotkey_action_choices, hotkey_action_label, hotkey_description, import_summary_message,
-    parse_entry_value, preset_entry_description, snap_debounce_ms, snap_revert_seconds,
+    hotkey_action_label, hotkey_description, import_summary_message, parse_entry_value,
+    preset_entry_description, snap_debounce_ms, snap_revert_seconds,
 };
 use ids::{Control, EntryButton, ROW_LIMIT, RowButton};
 
@@ -1382,7 +1382,10 @@ fn build_hotkeys(builder: &mut Builder<'_>) {
             0,
         );
     }
-    let actions: Vec<String> = hotkey_choices(builder.context)
+    let actions: Vec<String> = builder
+        .context
+        .model
+        .hotkey_choices()
         .iter()
         .map(hotkey_action_label)
         .collect();
@@ -1456,18 +1459,6 @@ fn build_hotkeys(builder: &mut Builder<'_>) {
         FontKind::Body,
     );
     builder.card_end();
-}
-
-/// The Action menu's entries, in order; inputs come from the selected monitor.
-fn hotkey_choices(context: &WindowContext) -> Vec<HotkeyAction> {
-    let inputs: Vec<u32> = context
-        .model
-        .controls()
-        .iter()
-        .find(|reading| reading.capability.key == ControlKey::Input)
-        .map(|reading| reading.capability.enum_values.clone())
-        .unwrap_or_default();
-    hotkey_action_choices(context.model.presets(), &inputs)
 }
 
 fn build_safety(builder: &mut Builder<'_>) {
@@ -2052,51 +2043,26 @@ fn combo_selection(context: &WindowContext, control: Control) -> Option<usize> {
 }
 
 fn add_hotkey(context: &mut WindowContext) {
-    let text = read_child_text(context, Control::HotkeyKeys).unwrap_or_default();
-    if text.trim().is_empty() {
-        set_status(
-            context,
-            "Click the Keys box and press the combination you want to use.",
-        );
-        return;
-    }
-    let keys: KeyCombo = match text.parse() {
-        Ok(keys) => keys,
-        Err(error) => {
-            set_status(context, &error.to_string());
+    let binding = context.model.hotkey_from_form(
+        &read_child_text(context, Control::HotkeyKeys).unwrap_or_default(),
+        combo_selection(context, Control::HotkeyAction),
+        combo_selection(context, Control::HotkeyMonitor),
+    );
+    let binding = match binding {
+        Ok(binding) => binding,
+        Err(message) => {
+            set_status(context, &message);
             return;
         }
     };
-    let choices = hotkey_choices(context);
-    let Some(action) = combo_selection(context, Control::HotkeyAction)
-        .and_then(|index| choices.get(index).cloned())
-    else {
-        set_status(context, "Choose what the hotkey does.");
-        return;
-    };
-    let monitor = match (&action, combo_selection(context, Control::HotkeyMonitor)) {
-        (
-            HotkeyAction::ApplyPreset(_) | HotkeyAction::NextPreset | HotkeyAction::PreviousPreset,
-            _,
-        ) => None,
-        (_, Some(index)) if index > 0 => context
-            .model
-            .monitors()
-            .get(index - 1)
-            .map(|monitor| monitor.id.clone()),
-        _ => None,
-    };
+    let keys = binding.keys;
     let replaced = context
         .model
         .hotkeys()
         .iter()
         .any(|binding| binding.keys == keys);
-    let label = hotkey_action_label(&action);
-    match context.model.save_hotkey(HotkeyBinding {
-        keys,
-        action,
-        monitor,
-    }) {
+    let label = hotkey_action_label(&binding.action);
+    match context.model.save_hotkey(binding) {
         Ok(()) => {
             crate::hotkeys::register(context);
             let message = match context.hotkeys.failure(&keys) {

@@ -21,12 +21,22 @@ use windows::core::{HRESULT, PCWSTR};
 use crate::{IpcError, MAX_MESSAGE_SIZE};
 
 const PIPE_NAME: &str = r"\\.\pipe\dispcontrol-v0";
+/// Overrides the pipe name for the daemon and the CLI alike, so a test or a
+/// second instance does not talk to the user's running daemon.
+pub const PIPE_ENV: &str = "DISPCONTROL_PIPE";
+
+fn pipe_name() -> String {
+    match std::env::var(PIPE_ENV) {
+        Ok(name) if !name.trim().is_empty() => format!(r"\\.\pipe\{}", name.trim()),
+        _ => PIPE_NAME.to_owned(),
+    }
+}
 const PIPE_INSTANCE_LIMIT: u32 = 16;
 
 pub fn serve_forever(
     handler: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
 ) -> Result<(), IpcError> {
-    serve_forever_on(PIPE_NAME, handler)
+    serve_forever_on(&pipe_name(), handler)
 }
 
 /// Serves `handler` on the named pipe `name` (tests use a private name).
@@ -100,7 +110,7 @@ fn wait_for_client_close(pipe: &mut File) -> Result<(), IpcError> {
 }
 
 pub fn transact(payload: &[u8]) -> Result<Vec<u8>, IpcError> {
-    transact_on(PIPE_NAME, payload)
+    transact_on(&pipe_name(), payload)
 }
 
 pub(crate) fn transact_on(name: &str, payload: &[u8]) -> Result<Vec<u8>, IpcError> {

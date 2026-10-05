@@ -4,7 +4,7 @@ mod windows_pipe;
 use std::fmt;
 use std::str::FromStr;
 
-use dispcontrol_app::{ApplyReport, BackendError, EntryStatus, MonitorService, UseCaseError};
+use dispcontrol_app::{Api, ApplyReport, BackendError, EntryStatus, UseCaseError};
 use dispcontrol_domain::{AppSettings, ControlKey, ControlValue, MonitorId, Preset, PresetEntry};
 use serde::{Deserialize, Serialize};
 
@@ -216,7 +216,7 @@ struct SetDto {
     changed: bool,
 }
 
-pub fn dispatch(service: &MonitorService, input: &[u8]) -> Vec<u8> {
+pub fn dispatch(service: &dyn Api, input: &[u8]) -> Vec<u8> {
     let result = dispatch_inner(service, input);
     let response = match result {
         Ok(value) => Response {
@@ -246,10 +246,7 @@ struct DispatchError {
     message: String,
 }
 
-fn dispatch_inner(
-    service: &MonitorService,
-    input: &[u8],
-) -> Result<serde_json::Value, DispatchError> {
+fn dispatch_inner(service: &dyn Api, input: &[u8]) -> Result<serde_json::Value, DispatchError> {
     let request: Request =
         serde_json::from_slice(input).map_err(|error| DispatchError::new(2, error.to_string()))?;
     match request {
@@ -504,7 +501,7 @@ impl fmt::Display for IpcError {
 impl std::error::Error for IpcError {}
 
 #[cfg(windows)]
-pub use windows_pipe::{serve_forever, transact};
+pub use windows_pipe::{PIPE_ENV, serve_forever, transact};
 
 #[cfg(test)]
 mod tests {
@@ -520,7 +517,7 @@ mod tests {
         )))
     }
 
-    fn service() -> Arc<MonitorService> {
+    fn service() -> Arc<dispcontrol_app::MonitorService> {
         harness().service
     }
 
@@ -538,7 +535,7 @@ mod tests {
     #[test]
     fn invalid_request_is_reported_as_error_response() {
         let response: serde_json::Value =
-            serde_json::from_slice(&dispatch(&service(), b"{")).unwrap();
+            serde_json::from_slice(&dispatch(&*service(), b"{")).unwrap();
         assert_eq!(response["ok"], false);
         assert_eq!(response["code"], 2);
         assert!(response["error"].as_str().unwrap().contains("EOF"));
@@ -547,7 +544,7 @@ mod tests {
     #[test]
     fn dispatch_lists_monitors_in_the_wire_response() {
         let response: serde_json::Value =
-            serde_json::from_slice(&dispatch(&service(), br#"{"op":"list"}"#)).unwrap();
+            serde_json::from_slice(&dispatch(&*service(), br#"{"op":"list"}"#)).unwrap();
         assert_eq!(response["ok"], true);
         assert_eq!(response["result"][0]["id"], "fake-0");
         assert!(response.get("code").is_none());
@@ -556,7 +553,7 @@ mod tests {
     #[test]
     fn dispatch_reports_unsupported_controls_as_wire_errors() {
         let response: serde_json::Value = serde_json::from_slice(&dispatch(
-            &service(),
+            &*service(),
             br#"{"op":"get","monitor":"fake-0","control":"volume"}"#,
         ))
         .unwrap();
@@ -573,7 +570,7 @@ mod tests {
     #[test]
     fn dispatch_maps_missing_monitor_to_documented_exit_code() {
         let response: serde_json::Value = serde_json::from_slice(&dispatch(
-            &service(),
+            &*service(),
             br#"{"op":"get","monitor":"missing","control":"brightness"}"#,
         ))
         .unwrap();
@@ -585,19 +582,19 @@ mod tests {
     fn dispatch_saves_and_reads_back_settings() {
         let service = service();
         let saved: serde_json::Value = serde_json::from_slice(&dispatch(
-            &service,
+            &*service,
             br#"{"op":"settings_set","settings":{"debounce_ms":800,"confirm_input_change":false,"input_revert_seconds":0,"live_preview":false}}"#,
         ))
         .unwrap();
         assert_eq!(saved["ok"], true);
         let read_back: serde_json::Value =
-            serde_json::from_slice(&dispatch(&service, br#"{"op":"settings_get"}"#)).unwrap();
+            serde_json::from_slice(&dispatch(&*service, br#"{"op":"settings_get"}"#)).unwrap();
         assert_eq!(read_back["result"]["debounce_ms"], 800);
         assert_eq!(read_back["result"]["confirm_input_change"], false);
         assert_eq!(read_back["result"]["input_revert_seconds"], 0);
     }
 
-    fn call(service: &MonitorService, request: &str) -> serde_json::Value {
+    fn call(service: &dispcontrol_app::MonitorService, request: &str) -> serde_json::Value {
         serde_json::from_slice(&dispatch(service, request.as_bytes())).unwrap()
     }
 
@@ -863,7 +860,7 @@ mod windows_tests {
             100,
         )))
         .service;
-        let name = start_server(move |request| dispatch(&service, request));
+        let name = start_server(move |request| dispatch(&*service, request));
         let response: serde_json::Value =
             serde_json::from_slice(&transact_on(&name, br#"{"op":"list"}"#).unwrap()).unwrap();
         assert_eq!(response["ok"], true);

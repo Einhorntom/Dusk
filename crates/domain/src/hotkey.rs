@@ -226,6 +226,15 @@ impl HotkeyAction {
         matches!(self, Self::Step { .. })
     }
 
+    /// Whether a target monitor applies. Preset actions use the monitors
+    /// stored in the preset; the others act on one or all monitors.
+    pub fn uses_monitor(&self) -> bool {
+        !matches!(
+            self,
+            Self::ApplyPreset(_) | Self::NextPreset | Self::PreviousPreset
+        )
+    }
+
     pub fn preset_name(&self) -> Option<&str> {
         match self {
             Self::ApplyPreset(name) => Some(name),
@@ -366,6 +375,19 @@ mod tests {
         assert!("input:HDMI".parse::<HotkeyAction>().is_err());
         let schedule = "schedule-toggle".parse::<HotkeyAction>().unwrap_err();
         assert!(schedule.to_string().contains("v2"));
+    }
+
+    #[test]
+    fn only_non_preset_actions_use_a_target_monitor() {
+        for (text, uses) in [
+            ("brightness+", true),
+            ("input:0x11", true),
+            ("power-toggle", true),
+            ("preset:Night", false),
+            ("preset-next", false),
+        ] {
+            assert_eq!(text.parse::<HotkeyAction>().unwrap().uses_monitor(), uses);
+        }
     }
 
     #[test]

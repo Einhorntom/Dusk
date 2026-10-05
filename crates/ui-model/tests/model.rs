@@ -221,3 +221,48 @@ fn preset_hotkeys_refresh_values_and_follow_renames_and_deletes() {
     model.remove_hotkey(&keys).unwrap();
     assert!(model.hotkeys().is_empty());
 }
+
+#[test]
+fn the_add_hotkey_form_offers_the_selected_monitors_inputs_and_builds_a_binding() {
+    let (mut model, _) = model_with(vec![
+        FakeMonitor::reference("left"),
+        FakeMonitor::reference("right"),
+    ]);
+    model.save_current_as_preset("Night", false).unwrap();
+    let choices: Vec<String> = model
+        .hotkey_choices()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert!(choices.contains(&"preset:Night".to_owned()));
+    assert!(choices.contains(&"input:0x11".to_owned()));
+    let index = |text: &str| choices.iter().position(|choice| choice == text);
+
+    let targeted = model
+        .hotkey_from_form("Ctrl+Alt+Up", index("brightness+"), Some(2))
+        .unwrap();
+    assert_eq!(targeted.monitor, Some(MonitorId::new("right").unwrap()));
+    let everywhere = model
+        .hotkey_from_form("Ctrl+Alt+Up", index("brightness+"), Some(0))
+        .unwrap();
+    assert_eq!(everywhere.monitor, None);
+    // Preset actions use the preset's own monitors.
+    let preset = model
+        .hotkey_from_form("Ctrl+Alt+N", index("preset:Night"), Some(1))
+        .unwrap();
+    assert_eq!(preset.monitor, None);
+}
+
+#[test]
+fn an_incomplete_add_hotkey_form_explains_what_is_missing() {
+    let (model, _) = model_with(vec![FakeMonitor::reference("m")]);
+    let empty = model.hotkey_from_form("  ", Some(0), None).unwrap_err();
+    assert!(empty.contains("press the combination"));
+    let bare = model
+        .hotkey_from_form("Shift+A", Some(0), None)
+        .unwrap_err();
+    assert!(bare.contains("Ctrl, Alt or Win"));
+    let no_action = model.hotkey_from_form("F9", None, None).unwrap_err();
+    assert!(no_action.contains("Choose what"));
+    assert!(model.hotkey_from_form("F9", Some(999), None).is_err());
+}

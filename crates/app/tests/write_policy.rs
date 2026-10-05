@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use dispcontrol_app::{Clock, UseCaseError};
 use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor, Harness};
-use dispcontrol_domain::{ControlKey, ControlValue, MonitorId};
+use dispcontrol_domain::{ControlKey, ControlValue, MIN_WRITE_INTERVAL, MonitorId};
 
 fn brightness_monitor() -> (Harness, MonitorId) {
     let monitor = FakeMonitor::new("test-monitor").numeric(ControlKey::Brightness, 50, 100);
@@ -119,22 +119,18 @@ fn explicit_set_supersedes_a_pending_slider_target_for_the_same_control() {
 }
 
 #[test]
-fn explicit_writes_obey_one_second_and_thirty_per_minute_limits() {
+fn explicit_writes_wait_for_the_rate_limiter() {
+    // The limits themselves are unit-tested in domain::write_policy.
     let (h, id) = brightness_monitor();
     let start = h.clock.now();
-    for index in 0..30 {
-        let value = if index % 2 == 0 { 0 } else { 100 };
-        h.service
-            .set(&id, ControlKey::Brightness, percent(value))
-            .unwrap();
-    }
-    assert_eq!(h.backend.writes().len(), 30);
-
     h.service
-        .set(&id, ControlKey::Brightness, percent(0))
+        .set(&id, ControlKey::Brightness, percent(10))
         .unwrap();
-    assert_eq!(h.backend.writes().len(), 31);
-    assert!(h.clock.now().duration_since(start) >= Duration::from_secs(60));
+    h.service
+        .set(&id, ControlKey::Brightness, percent(20))
+        .unwrap();
+    assert_eq!(h.backend.written_values(), vec![10, 20]);
+    assert_eq!(h.clock.now() - start, MIN_WRITE_INTERVAL);
 }
 
 #[test]

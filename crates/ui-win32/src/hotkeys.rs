@@ -2,7 +2,11 @@
 //! key-recording field used by the Hotkeys page. Humble: the behaviour lives
 //! in `app::hotkeys` and `ui-model`.
 
-use dispcontrol_app::HotkeyOutcome;
+use std::ffi::c_void;
+use std::sync::Arc;
+use std::sync::mpsc::{self, Sender};
+
+use dispcontrol_app::{Api, HotkeyOutcome};
 use dispcontrol_domain::{HotkeyBinding, KeyCombo};
 use dispcontrol_ui_model::text::{Indicator, hotkey_action_label, hotkey_indicator};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -24,6 +28,8 @@ use crate::modern::{self, osd};
 /// Posted to the main window when the key-recording field gains (`wparam` 1)
 /// or loses (0) focus, so registered hotkeys do not swallow the keys.
 pub(crate) const RECORDING_MESSAGE: u32 = WM_APP + 2;
+/// Posted by the hotkey worker with a boxed `Finished` in `lparam`.
+pub(crate) const FINISHED_MESSAGE: u32 = WM_APP + 3;
 
 const ERROR_HOTKEY_ALREADY_REGISTERED: u32 = 1409;
 
@@ -114,6 +120,63 @@ pub(crate) fn register(context: &mut WindowContext) {
     }
 }
 
+/// A hotkey run on the worker thread, sent back to the UI thread.
+struct Finished {
+    label: String,
+    result: Result<HotkeyOutcome, String>,
+}
+
+/// Runs hotkey actions on one worker thread, in press order, so a slow or
+/// hung monitor never blocks the window, tray or later key presses
+/// (SPEC-MON-4). Results come back as `FINISHED_MESSAGE`.
+#[derive(Default)]
+pub(crate) struct Runner {
+    jobs: Option<Sender<(KeyCombo, String)>>,
+}
+
+impl Runner {
+    fn submit(&mut self, window: HWND, api: &Arc<dyn Api>, keys: KeyCombo, label: String) {
+        let jobs = self
+            .jobs
+            .get_or_insert_with(|| start_worker(window, api.clone()));
+        if let Err(mpsc::SendError(job)) = jobs.send((keys, label)) {
+            // The worker stopped; start a new one for this and later presses.
+            let jobs = self.jobs.insert(start_worker(window, api.clone()));
+            let _ = jobs.send(job);
+        }
+    }
+}
+
+fn start_worker(window: HWND, api: Arc<dyn Api>) -> Sender<(KeyCombo, String)> {
+    let (sender, jobs) = mpsc::channel::<(KeyCombo, String)>();
+    // HWND is not Send; the worker only posts messages to it.
+    let window = window.0 as isize;
+    let spawned = std::thread::Builder::new()
+        .name("dispcontrol-hotkeys".into())
+        .spawn(move || {
+            while let Ok((keys, label)) = jobs.recv() {
+                let result = api.run_hotkey(&keys).map_err(|error| error.to_string());
+                let finished = Box::into_raw(Box::new(Finished { label, result }));
+                let posted = unsafe {
+                    PostMessageW(
+                        Some(HWND(window as *mut c_void)),
+                        FINISHED_MESSAGE,
+                        WPARAM(0),
+                        LPARAM(finished as isize),
+                    )
+                };
+                if posted.is_err() {
+                    // The window is gone; nobody will take the result.
+                    drop(unsafe { Box::from_raw(finished) });
+                }
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("error: could not start the hotkey worker: {error}");
+    }
+    sender
+}
+
 pub(crate) fn on_hotkey(context: &mut WindowContext, id: i32) {
     let Some(keys) = context.hotkeys.keys_for(id) else {
         return;
@@ -125,9 +188,21 @@ pub(crate) fn on_hotkey(context: &mut WindowContext, id: i32) {
         .find(|binding| binding.keys == keys)
         .map(|binding| hotkey_action_label(&binding.action))
         .unwrap_or_else(|| keys.to_string());
+    let api = context.model.api();
+    context
+        .hotkey_runner
+        .submit(context.window, &api, keys, label);
+}
+
+/// Shows a finished hotkey: updates values, starts the commit timer for
+/// steps, and shows the on-screen indicator.
+pub(crate) fn on_hotkey_finished(context: &mut WindowContext, lparam: LPARAM) {
+    // SAFETY: only the hotkey worker posts this message, with a leaked Box.
+    let finished = unsafe { Box::from_raw(lparam.0 as *mut Finished) };
     let show_indicator = context.model.settings().show_osd;
-    match context.model.run_hotkey(&keys) {
+    match finished.result {
         Ok(outcome) => {
+            context.model.apply_hotkey_outcome(&outcome);
             if let HotkeyOutcome::Stepped { control, .. } = &outcome {
                 start_commit_timer(context);
                 if !context.native_ui {
@@ -141,10 +216,10 @@ pub(crate) fn on_hotkey(context: &mut WindowContext, id: i32) {
             }
         }
         Err(error) => {
-            set_status(context, &format!("{label}: {error}"));
+            set_status(context, &format!("{}: {error}", finished.label));
             if show_indicator {
                 osd::show(&Indicator {
-                    title: label,
+                    title: finished.label,
                     value: "Failed".into(),
                     level: None,
                 });
@@ -285,7 +360,10 @@ mod tests {
         }
     }
 
+    /// OS integration check: registers real system-wide hotkeys, so it needs
+    /// an interactive desktop and is run explicitly.
     #[test]
+    #[ignore = "registers system-wide hotkeys; needs a desktop session; run with --ignored"]
     fn a_taken_combination_is_reported_and_the_others_still_register() {
         let (other_app, ours) = (message_window(), message_window());
         let taken = binding("Ctrl+Alt+Shift+F23");
@@ -293,10 +371,11 @@ mod tests {
 
         let mut blocker = Registrar::default();
         blocker.register_all(other_app, std::slice::from_ref(&taken));
-        if blocker.failure(&taken.keys).is_some() {
-            // No interactive desktop (or the keys are really taken): nothing to test.
-            return;
-        }
+        assert_eq!(
+            blocker.failure(&taken.keys),
+            None,
+            "this session cannot register hotkeys, or another app holds the test keys"
+        );
         let mut registrar = Registrar::default();
         let failures = registrar
             .register_all(ours, &[taken.clone(), free.clone()])

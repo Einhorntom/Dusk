@@ -6,6 +6,12 @@ mod hotkey;
 
 pub use hotkey::{HotkeyAction, HotkeyBinding, Key, KeyCombo, STEPPABLE_CONTROLS};
 
+mod write_policy;
+
+pub use write_policy::{
+    DueTarget, MAX_WRITES_PER_MINUTE, MIN_WRITE_INTERVAL, RateLimiter, WriteBuffer,
+};
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct MonitorId(String);
 
@@ -43,6 +49,18 @@ pub enum ControlKey {
 }
 
 impl ControlKey {
+    pub const ALL: [ControlKey; 9] = [
+        Self::Brightness,
+        Self::Contrast,
+        Self::ColorPreset,
+        Self::GainRed,
+        Self::GainGreen,
+        Self::GainBlue,
+        Self::Input,
+        Self::Volume,
+        Self::Power,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Brightness => "brightness",
@@ -272,7 +290,29 @@ pub struct AppSettings {
 /// Allowed hotkey step sizes, in percent.
 pub const STEP_RANGE: std::ops::RangeInclusive<u32> = 1..=25;
 
+/// Allowed quiet period before a buffered write (SPEC-WR-2).
+pub const DEBOUNCE_RANGE: std::ops::RangeInclusive<u32> = 150..=2000;
+/// Allowed input revert timer; 0 turns it off (SPEC-IN).
+pub const REVERT_RANGE: std::ops::RangeInclusive<u32> = 5..=60;
+
 impl AppSettings {
+    /// The settings rules, shared by the use cases and the settings file.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !DEBOUNCE_RANGE.contains(&self.debounce_ms) {
+            return Err("debounce must be between 150 and 2000 milliseconds");
+        }
+        if self.input_revert_seconds != 0 && !REVERT_RANGE.contains(&self.input_revert_seconds) {
+            return Err("input revert must be 0 or between 5 and 60 seconds");
+        }
+        if [self.brightness_step, self.contrast_step, self.volume_step]
+            .iter()
+            .any(|step| !STEP_RANGE.contains(step))
+        {
+            return Err("hotkey steps must be between 1 and 25 percent");
+        }
+        Ok(())
+    }
+
     /// Step size for a steppable control, or `None` for other controls.
     pub fn step_for(&self, control: ControlKey) -> Option<u32> {
         match control {
@@ -409,6 +449,41 @@ mod tests {
         assert!(!preset.is_entry_inert(&gain));
         preset.entries.remove(0);
         assert!(!preset.is_entry_inert(&gain));
+    }
+
+    #[test]
+    fn settings_rules_accept_the_defaults_and_reject_each_bad_value() {
+        assert_eq!(AppSettings::default().validate(), Ok(()));
+        let bad = [
+            AppSettings {
+                debounce_ms: 149,
+                ..AppSettings::default()
+            },
+            AppSettings {
+                debounce_ms: 2001,
+                ..AppSettings::default()
+            },
+            AppSettings {
+                input_revert_seconds: 4,
+                ..AppSettings::default()
+            },
+            AppSettings {
+                volume_step: 0,
+                ..AppSettings::default()
+            },
+            AppSettings {
+                brightness_step: 26,
+                ..AppSettings::default()
+            },
+        ];
+        for settings in bad {
+            assert!(settings.validate().is_err(), "{settings:?}");
+        }
+        let off = AppSettings {
+            input_revert_seconds: 0,
+            ..AppSettings::default()
+        };
+        assert_eq!(off.validate(), Ok(()));
     }
 
     #[test]

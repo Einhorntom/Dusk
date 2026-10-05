@@ -146,9 +146,9 @@ Pure data and rules; time and randomness are always passed in.
 - **Quirk profile:** plain data type (capability overrides, timing, retry hints) (SPEC-QRK).
 - **Preset and entries:** `{monitor, control, value}` using normalized values and `EnumKey`s; `apply_order` (SPEC-PRE-4) and `diff(preset, current_state)` returning only entries that must be written (SPEC-PRE-3, SPEC-WR-4).
 - **Schedule:** `Rule {time, days, preset, enabled}`; pure functions `next_trigger(now_local, rules)` and `most_recent_missed(now_local, rules, last_applied)` (SPEC-SCH-2/3/6/7).
-- **Write policy (SPEC-WR):** `WriteBuffer` (per monitor+control target, quiet period, "latest wins"), `RateLimiter` (1/s and 30/min), `LivePreviewThrottle` (max 4/s). They are state machines taking `now: Instant` as an argument, so tests use a fake time.
+- **Write policy (SPEC-WR):** `WriteBuffer` (per monitor+control target, quiet period, "latest wins"), `RateLimiter` (1/s and 30/min), `LivePreviewThrottle` (max 4/s). They are state machines taking `now: Instant` as an argument, so tests use a fake time. Implemented in `domain::write_policy` (`WriteBuffer`, `RateLimiter`; live preview is not implemented yet); `app` only orchestrates reads and writes around them.
 - **Input safety policy (SPEC-IN):** `requires_confirmation(current, target, settings)` and `RevertPlan {previous, deadline}`.
-- **Settings:** validated value types (write delay 150-2000 ms, revert 0 or 5-60 s, steps, etc.).
+- **Settings:** validated value types (write delay 150-2000 ms, revert 0 or 5-60 s, steps, etc.). `AppSettings::validate` is the single rule set, used by the use cases and the settings file.
 - **Errors:** typed enums (`NotSupported`, `OutOfRange`, `NotFound`, ...); no strings as control flow.
 
 ### 6.2 Application (`app`)
@@ -182,6 +182,8 @@ trait Api {
 ```
 Two implementations exist: `Engine` (in-process, hosted only by `dispcontrold` and tests) and `IpcClient` (in `ipc`, forwards to a running `dispcontrold`). The CLI and plugins only ever use `IpcClient` and never talk to monitors (SPEC-CLI-2).
 
+**As implemented:** the in-process implementation is `MonitorService`. The inbound port is split by concern (interface segregation): `ControlApi` (monitors and controls), `SettingsApi`, `PresetApi` and `HotkeyApi`; `Api` combines them and is implemented automatically for anything implementing all four. The Settings UI uses `Api`; `ipc::dispatch` takes `&dyn Api` and never names the concrete service.
+
 **Outbound (driven) ports** (declared in `app`, implemented in outer layers):
 
 | Port | Responsibility | Implemented by |
@@ -210,6 +212,7 @@ The core speaks in `ControlKey` and `NativeValue`. VCP codes, capability strings
   3. **One I/O worker per monitor**: serializes DDC calls (DDC/CI is not safe to run concurrently per monitor).
   4. **IPC listener thread**: accepts clients and forwards requests to the engine.
 - **Timeouts (SPEC-MON-4):** a DDC call can block inside the driver and cannot be cancelled. The engine waits on the worker with a timeout (default 2 s, up to 3 attempts with backoff). On timeout it marks the monitor "not responding" and replaces the worker; the stuck thread is abandoned and exits when the call returns. Other monitors, the UI and hotkeys are never blocked.
+- **As implemented (v1):** there is no separate engine actor yet; `MonitorService` holds its state behind mutexes and is called from the UI thread, the IPC threads and the hotkey worker. Per-monitor workers and timeouts are provided by `app::TimedBackend`, a `MonitorBackend` decorator (one worker thread per monitor plus one for discovery; 2 s timeout, 3 attempts without backoff, then `NotResponding`). Hotkey actions run on a dedicated worker thread and report back with a window message. Remaining gap: Settings-window actions (Apply preset, Refresh, value changes) still call the service on the UI thread, so a hung monitor can stall the window for up to about 6 s (bounded, not indefinite).
 - **State publication:** the engine publishes immutable `Snapshot`s. The UI thread receives them through a queue plus a custom window message, so UI code never locks engine state.
 - **Backpressure:** hotkey auto-repeat and slider drags only update the in-memory target; at most one commit per control is queued.
 - **Memory (SPEC-NFR-1):** windows and GPU resources (render targets, DirectWrite objects) are created when a window is shown and released when it is hidden. The settings window is created lazily. Idle residence is tray icon + engine + workers.
@@ -335,7 +338,7 @@ Every implementation change follows Clean Architecture and the test pyramid. Tes
 | Adapter/contract integration | Few | `ddc-windows`, `store-file`, `ipc`, `cli` | Test the adapter against its public port/protocol with narrow fixtures or local fakes. Keep real-hardware tests opt-in and explicitly gated; never make ordinary CI write to a monitor. |
 | System/UI/acceptance (tip) | Very few | composition roots and Windows UI | A small number of smoke checks exercise the assembled app. Hardware acceptance is a manual checklist on the reference display. Keep window procedures and OS calls as humble wrappers. |
 
-Where tests live: `app` use-case tests are integration tests in `crates/app/tests/` (unit tests inside `app` cannot use `ddc-fake`, which links the non-test build of `app`); `ui-model` has unit tests for pure text/label rules in `src/text.rs` and view-model tests in `tests/`; `cli` tests run the real argument parsing against the daemon dispatcher through `run_with` and an in-process transport; `ipc` tests cover dispatch over fakes and real named-pipe round trips on private pipe names; `ui-win32` tests only its pure control-ID table (`modern/ids.rs`).
+Where tests live: the `MonitorBackend` contract (`ddc_fake::contract`) runs against `FakeBackend` (also behind `TimedBackend`) in every build and against real monitors with `cargo test -p dispcontrol-ddc-windows -- --ignored` (reads only). OS-level checks that need a desktop are `#[ignore]`d and run explicitly (`cargo test -p dispcontrol-ui-win32 -- --ignored`). The end-to-end smoke test (`bin-daemon/tests/smoke.rs`) starts `dispcontrold --demo --background --config <temp>` on a private pipe (`DISPCONTROL_PIPE`) and drives it with the CLI; it needs no monitor.  `app` use-case tests are integration tests in `crates/app/tests/` (unit tests inside `app` cannot use `ddc-fake`, which links the non-test build of `app`); `ui-model` has unit tests for pure text/label rules in `src/text.rs` and view-model tests in `tests/`; `cli` tests run the real argument parsing against the daemon dispatcher through `run_with` and an in-process transport; `ipc` tests cover dispatch over fakes and real named-pipe round trips on private pipe names; `ui-win32` tests only its pure control-ID table (`modern/ids.rs`).
 
 Do not duplicate the same assertion at every layer. Put each rule at the lowest layer that owns it, then add only the integration checks needed to prove boundaries are wired correctly. Default CI runs the unit, use-case, and safe adapter suites; it excludes physical monitor writes.
 

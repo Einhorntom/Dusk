@@ -353,6 +353,15 @@ mod tests {
             preset_request(&args(&["preset", "save", "Day", "--include-input"]), false).unwrap(),
             json!({ "op": "preset_save", "name": "Day", "include_input": true })
         );
+        // The refusal without --force is the daemon's rule (tested in ipc).
+        assert_eq!(
+            preset_request(&args(&["preset", "delete", "Day", "--force"]), false).unwrap(),
+            json!({ "op": "preset_delete", "name": "Day", "force": true })
+        );
+        assert_eq!(
+            preset_request(&args(&["preset", "delete", "Day"]), false).unwrap(),
+            json!({ "op": "preset_delete", "name": "Day", "force": false })
+        );
         assert_eq!(
             preset_request(&args(&["preset", "move", "Day", "-1"]), false).unwrap(),
             json!({ "op": "preset_move", "name": "Day", "offset": -1 })

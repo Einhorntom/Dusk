@@ -38,13 +38,14 @@ name = "dispcontrol-bin-daemon"
 version = "0.1.0"
 dependencies = [
  "dispcontrol-app",
+ "dispcontrol-cli",
+ "dispcontrol-ddc-fake",
  "dispcontrol-ddc-windows",
- "dispcontrol-domain",
  "dispcontrol-ipc",
  "dispcontrol-store-file",
  "dispcontrol-ui-win32",
  "embed-resource",
- "windows",
+ "serde_json",
 ]
 
 [[package]]
@@ -71,6 +72,7 @@ name = "dispcontrol-ddc-windows"
 version = "0.1.0"
 dependencies = [
  "dispcontrol-app",
+ "dispcontrol-ddc-fake",
  "dispcontrol-domain",
  "dispcontrol-mccs",
  "windows",

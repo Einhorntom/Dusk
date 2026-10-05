@@ -7,7 +7,7 @@ use windows::Win32::Devices::Display::{
     GetNumberOfPhysicalMonitorsFromHMONITOR, GetPhysicalMonitorsFromHMONITOR,
     GetVCPFeatureAndVCPFeatureReply, MC_VCP_CODE_TYPE, PHYSICAL_MONITOR, SetVCPFeature,
 };
-use windows::Win32::Foundation::{LPARAM, RECT};
+use windows::Win32::Foundation::{ERROR_NOT_FOUND, LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, HMONITOR, MONITORENUMPROC};
 use windows::core::BOOL;
 
@@ -71,9 +71,15 @@ impl WindowsDdcBackend {
                         let _ = DestroyPhysicalMonitor(monitor.hPhysicalMonitor);
                     }
                 }
-                return Err(BackendError::Failed(format!(
-                    "GetPhysicalMonitorsFromHMONITOR: {error}"
-                )));
+                // One display that cannot be opened (e.g. a laptop panel,
+                // which has no DDC/CI) must not hide the others. Windows
+                // reports that case as "element not found".
+                if error.code() != ERROR_NOT_FOUND.to_hresult() {
+                    eprintln!(
+                        "warning: skipping a display: GetPhysicalMonitorsFromHMONITOR: {error}"
+                    );
+                }
+                continue;
             }
 
             for handle in physical {
@@ -263,6 +269,14 @@ fn last_error(operation: &str) -> BackendError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Hardware check: reads every control of every connected monitor and
+    /// writes only to a nonexistent monitor or an unreported control.
+    #[test]
+    #[ignore = "reads the real monitors over DDC/CI; run with --ignored"]
+    fn windows_backend_meets_the_backend_contract() {
+        dispcontrol_ddc_fake::contract::check_backend_contract(&WindowsDdcBackend::new());
+    }
 
     #[test]
     fn vcp_code_mapping_stays_in_domain() {

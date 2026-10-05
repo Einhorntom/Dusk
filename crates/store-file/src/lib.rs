@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use dispcontrol_app::{BackendError, HotkeyRepository, PresetRepository, SettingsRepository};
 use dispcontrol_domain::{
     AppSettings, ControlKey, ControlValue, HotkeyBinding, MonitorId, Preset, PresetEntry,
-    STEP_RANGE, validate_preset_name,
+    validate_preset_name,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -369,29 +369,9 @@ const EXPORT_HEADER: &str = "\
 ";
 
 fn validate(settings: &AppSettings) -> Result<(), BackendError> {
-    if !(150..=2000).contains(&settings.debounce_ms) {
-        return Err(BackendError::Failed(
-            "debounce must be between 150 and 2000 milliseconds".into(),
-        ));
-    }
-    if settings.input_revert_seconds != 0 && !(5..=60).contains(&settings.input_revert_seconds) {
-        return Err(BackendError::Failed(
-            "input revert must be 0 or between 5 and 60 seconds".into(),
-        ));
-    }
-    if [
-        settings.brightness_step,
-        settings.contrast_step,
-        settings.volume_step,
-    ]
-    .iter()
-    .any(|step| !STEP_RANGE.contains(step))
-    {
-        return Err(BackendError::Failed(
-            "hotkey steps must be between 1 and 25 percent".into(),
-        ));
-    }
-    Ok(())
+    settings
+        .validate()
+        .map_err(|message| BackendError::Failed(message.into()))
 }
 
 fn atomic_write(path: &Path, content: &[u8]) -> io::Result<()> {

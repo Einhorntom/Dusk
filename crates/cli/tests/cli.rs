@@ -22,7 +22,7 @@ fn id() -> MonitorId {
 fn cli(h: &Harness, args: &[&str]) -> Result<String, CliError> {
     let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
     let service = h.service.clone();
-    run_with(&args, &move |request| Ok(dispatch(&service, request)))
+    run_with(&args, &move |request| Ok(dispatch(&*service, request)))
 }
 
 fn json(text: &str) -> Value {
@@ -150,26 +150,4 @@ fn preset_path_reports_the_store_location() {
     let h = harness();
     let output = json(&cli(&h, &["--json", "preset", "path"]).unwrap());
     assert_eq!(output["result"]["path"], "memory://presets");
-}
-
-#[test]
-fn deleting_a_preset_used_by_a_hotkey_needs_force() {
-    let h = harness();
-    cli(&h, &["preset", "save", "Night"]).unwrap();
-    h.service
-        .save_hotkey(dispcontrol_domain::HotkeyBinding {
-            keys: "Ctrl+Alt+N".parse().unwrap(),
-            action: "preset:Night".parse().unwrap(),
-            monitor: None,
-        })
-        .unwrap();
-    let refused = cli(&h, &["preset", "delete", "Night"]).unwrap_err();
-    assert_eq!(refused.exit_code, 2);
-    assert!(refused.message.contains("Ctrl+Alt+N"));
-    assert!(refused.message.contains("--force"));
-    assert_eq!(h.presets.stored().len(), 1);
-
-    cli(&h, &["preset", "delete", "Night", "--force"]).unwrap();
-    assert!(h.presets.stored().is_empty());
-    assert!(h.hotkeys.stored().is_empty());
 }

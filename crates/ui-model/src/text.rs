@@ -180,10 +180,7 @@ pub fn hotkey_action_label(action: &HotkeyAction) -> String {
 /// combination could not be registered, why (SPEC-HK-5).
 pub fn hotkey_description(binding: &HotkeyBinding, failure: Option<&str>) -> String {
     let mut text = hotkey_action_label(&binding.action);
-    let per_monitor = !matches!(
-        binding.action,
-        HotkeyAction::ApplyPreset(_) | HotkeyAction::NextPreset | HotkeyAction::PreviousPreset
-    );
+    let per_monitor = binding.action.uses_monitor();
     match &binding.monitor {
         Some(monitor) if per_monitor => text.push_str(&format!(" on {monitor}")),
         None if per_monitor => text.push_str(" on all monitors"),

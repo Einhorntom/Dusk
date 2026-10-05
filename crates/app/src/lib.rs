@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use std::collections::{HashMap, VecDeque};
 use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -8,13 +7,17 @@ use std::time::{Duration, Instant};
 
 use dispcontrol_domain::{
     AppSettings, ControlCapability, ControlKey, ControlReading, ControlValue, DomainError,
-    HotkeyBinding, KeyCombo, Monitor, MonitorId, Preset, PresetEntry, STEP_RANGE,
+    HotkeyBinding, KeyCombo, Monitor, MonitorId, Preset, PresetEntry, RateLimiter, WriteBuffer,
     preset_names_equal, validate_preset_name,
 };
 
 mod hotkeys;
 
 pub use hotkeys::{HotkeyOutcome, HotkeyRepository};
+
+mod timed;
+
+pub use timed::{DEFAULT_ATTEMPTS, DEFAULT_TIMEOUT, TimedBackend};
 
 pub trait PresetRepository: Send + Sync {
     fn load_presets(&self) -> Result<Vec<Preset>, BackendError>;
@@ -139,7 +142,8 @@ pub trait Clock: Send + Sync {
     fn sleep(&self, duration: Duration);
 }
 
-pub trait Api: Send + Sync {
+/// Discovering monitors and reading or changing their controls (SPEC-CTL, SPEC-WR).
+pub trait ControlApi: Send + Sync {
     fn list_monitors(&self) -> Result<Vec<Monitor>, UseCaseError>;
     fn read(
         &self,
@@ -159,8 +163,16 @@ pub trait Api: Send + Sync {
         value: ControlValue,
     ) -> Result<(), UseCaseError>;
     fn flush_pending_adjustments(&self) -> Result<(usize, Option<Duration>), UseCaseError>;
+}
+
+/// Application settings (SPEC-DAT).
+pub trait SettingsApi: Send + Sync {
     fn settings(&self) -> Result<AppSettings, UseCaseError>;
     fn update_settings(&self, settings: AppSettings) -> Result<(), UseCaseError>;
+}
+
+/// Named monitor configurations (SPEC-PRE).
+pub trait PresetApi: Send + Sync {
     fn list_presets(&self) -> Result<Vec<Preset>, UseCaseError>;
     fn capture_preset(
         &self,
@@ -184,12 +196,22 @@ pub trait Api: Send + Sync {
     fn export_presets(&self) -> Result<String, UseCaseError>;
     fn import_presets(&self, text: &str, replace: bool) -> Result<ImportSummary, UseCaseError>;
     fn presets_location(&self) -> String;
+}
+
+/// Global hotkey bindings and running them (SPEC-HK).
+pub trait HotkeyApi: Send + Sync {
     fn list_hotkeys(&self) -> Result<Vec<HotkeyBinding>, UseCaseError>;
     fn save_hotkey(&self, binding: HotkeyBinding) -> Result<(), UseCaseError>;
     fn remove_hotkey(&self, keys: &KeyCombo) -> Result<(), UseCaseError>;
     fn hotkeys_using_preset(&self, name: &str) -> Result<Vec<KeyCombo>, UseCaseError>;
     fn run_hotkey(&self, keys: &KeyCombo) -> Result<HotkeyOutcome, UseCaseError>;
 }
+
+/// Everything a full client such as the Settings window uses. Clients that
+/// need less depend on the narrower traits.
+pub trait Api: ControlApi + SettingsApi + PresetApi + HotkeyApi {}
+
+impl<T: ControlApi + SettingsApi + PresetApi + HotkeyApi> Api for T {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BackendError {
@@ -266,16 +288,20 @@ pub struct MonitorService {
     hotkeys: Arc<dyn HotkeyRepository>,
     input_prompter: Arc<dyn InputChangePrompter>,
     clock: Arc<dyn Clock>,
-    write_history: Mutex<HashMap<(MonitorId, ControlKey), VecDeque<Instant>>>,
-    pending_adjustments: Mutex<HashMap<(MonitorId, ControlKey), PendingAdjustment>>,
+    write_buffer: Mutex<WriteBuffer<WriteKey>>,
+    rate_limiter: Mutex<RateLimiter<WriteKey>>,
     last_applied_preset: Mutex<Option<String>>,
 }
 
-#[derive(Clone, Copy)]
-struct PendingAdjustment {
-    value: ControlValue,
-    due: Instant,
-    rate_limit_reported: bool,
+type WriteKey = (MonitorId, ControlKey);
+
+fn locked<'a, T>(
+    mutex: &'a Mutex<T>,
+    what: &str,
+) -> Result<std::sync::MutexGuard<'a, T>, UseCaseError> {
+    mutex
+        .lock()
+        .map_err(|_| BackendError::Failed(format!("{what} is unavailable")).into())
 }
 
 impl MonitorService {
@@ -294,8 +320,8 @@ impl MonitorService {
             hotkeys,
             input_prompter,
             clock,
-            write_history: Mutex::new(HashMap::new()),
-            pending_adjustments: Mutex::new(HashMap::new()),
+            write_buffer: Mutex::new(WriteBuffer::default()),
+            rate_limiter: Mutex::new(RateLimiter::default()),
             last_applied_preset: Mutex::new(None),
         }
     }
@@ -428,17 +454,11 @@ impl MonitorService {
         if normalized > 100 {
             return Err(DomainError::NormalizedValueOutOfRange(normalized).into());
         }
-        let due = self.clock.now() + Duration::from_millis(settings.debounce_ms.into());
-        let mut pending = self.pending_adjustments.lock().map_err(|_| {
-            BackendError::Failed("pending monitor adjustments are unavailable".into())
-        })?;
-        pending.insert(
+        self.write_buffer()?.set_target(
             (monitor.clone(), control),
-            PendingAdjustment {
-                value,
-                due,
-                rate_limit_reported: false,
-            },
+            value,
+            self.clock.now(),
+            Duration::from_millis(settings.debounce_ms.into()),
         );
         Ok(())
     }
@@ -446,61 +466,41 @@ impl MonitorService {
     pub fn flush_pending_adjustments(&self) -> Result<(usize, Option<Duration>), UseCaseError> {
         let mut committed = 0;
         loop {
-            let due_adjustment = {
-                let now = self.clock.now();
-                let mut pending = self.pending_adjustments.lock().map_err(|_| {
-                    BackendError::Failed("pending monitor adjustments are unavailable".into())
-                })?;
-                let Some((key, adjustment)) = pending
-                    .iter()
-                    .filter(|(_, adjustment)| adjustment.due <= now)
-                    .min_by_key(|(_, adjustment)| adjustment.due)
-                    .map(|(key, adjustment)| (key.clone(), *adjustment))
-                else {
-                    let next_wake = pending
-                        .values()
-                        .map(|adjustment| adjustment.due.saturating_duration_since(now))
-                        .min();
-                    return Ok((committed, next_wake));
-                };
-                pending.remove(&key);
-                (key, adjustment)
+            let now = self.clock.now();
+            let Some(target) = self.write_buffer()?.take_due(now) else {
+                return Ok((committed, self.write_buffer()?.next_due(now)));
             };
-
-            let ((monitor, control), adjustment) = due_adjustment;
+            let (monitor, control) = &target.key;
             let (capability, previous_native) = self
                 .backend
-                .read_control(&monitor, control)?
-                .ok_or(UseCaseError::UnsupportedControl(control))?;
-            let ControlValue::Normalized(normalized) = adjustment.value else {
-                return Err(DomainError::InvalidNumericCapability(control).into());
-            };
-            let native = capability.normalized_to_native(normalized)?;
+                .read_control(monitor, *control)?
+                .ok_or(UseCaseError::UnsupportedControl(*control))?;
+            let native = target_native(&capability, target.value)?;
             if native == previous_native {
                 continue;
             }
-
-            if let Some(next_slot) = self.reserve_write_slot(&monitor, control)? {
-                if !adjustment.rate_limit_reported {
+            if let Err(next_slot) = self.rate_limiter()?.try_reserve(&target.key, now) {
+                if !target.deferred {
                     eprintln!("warning: monitor write rate limit deferred {control} for {monitor}");
                 }
-                let mut pending = self.pending_adjustments.lock().map_err(|_| {
-                    BackendError::Failed("pending monitor adjustments are unavailable".into())
-                })?;
-                pending.insert(
-                    (monitor, control),
-                    PendingAdjustment {
-                        value: adjustment.value,
-                        due: next_slot,
-                        rate_limit_reported: true,
-                    },
-                );
+                self.write_buffer()?.defer(target, next_slot);
                 continue;
             }
-
-            self.backend.write_control(&monitor, control, native)?;
+            self.backend.write_control(monitor, *control, native)?;
             committed += 1;
         }
+    }
+
+    fn write_buffer(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, WriteBuffer<WriteKey>>, UseCaseError> {
+        locked(&self.write_buffer, "pending monitor adjustments")
+    }
+
+    fn rate_limiter(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, RateLimiter<WriteKey>>, UseCaseError> {
+        locked(&self.rate_limiter, "monitor write limiter state")
     }
 
     fn discard_pending_adjustment(
@@ -508,12 +508,7 @@ impl MonitorService {
         monitor: &MonitorId,
         control: ControlKey,
     ) -> Result<(), UseCaseError> {
-        self.pending_adjustments
-            .lock()
-            .map_err(|_| {
-                BackendError::Failed("pending monitor adjustments are unavailable".into())
-            })?
-            .remove(&(monitor.clone(), control));
+        self.write_buffer()?.discard(&(monitor.clone(), control));
         Ok(())
     }
 
@@ -533,54 +528,19 @@ impl MonitorService {
         Ok((force || native != current).then_some(native))
     }
 
+    /// Blocks until the rate limit allows a write (explicit writes, SPEC-WR-7).
     fn wait_for_write_slot(
         &self,
         monitor: &MonitorId,
         control: ControlKey,
     ) -> Result<(), UseCaseError> {
-        loop {
-            if let Some(next_slot) = self.reserve_write_slot(monitor, control)? {
-                self.clock
-                    .sleep(next_slot.saturating_duration_since(self.clock.now()));
-            } else {
-                return Ok(());
-            }
-        }
-    }
-
-    fn reserve_write_slot(
-        &self,
-        monitor: &MonitorId,
-        control: ControlKey,
-    ) -> Result<Option<Instant>, UseCaseError> {
         let key = (monitor.clone(), control);
-        let now = self.clock.now();
-        let mut history = self.write_history.lock().map_err(|_| {
-            BackendError::Failed("monitor write limiter state is unavailable".into())
-        })?;
-        let writes = history.entry(key).or_default();
-        while writes
-            .front()
-            .is_some_and(|time| now.duration_since(*time) >= Duration::from_secs(60))
-        {
-            writes.pop_front();
-        }
-        let one_second_limit = writes.back().map(|time| *time + Duration::from_secs(1));
-        let one_minute_limit = (writes.len() >= 30)
-            .then(|| writes.front().copied())
-            .flatten()
-            .map(|time| time + Duration::from_secs(60));
-        let next_slot = match (one_second_limit, one_minute_limit) {
-            (Some(one_second), Some(one_minute)) => one_second.max(one_minute),
-            (Some(one_second), None) => one_second,
-            (None, Some(one_minute)) => one_minute,
-            (None, None) => now,
-        };
-        if next_slot > now {
-            Ok(Some(next_slot))
-        } else {
-            writes.push_back(now);
-            Ok(None)
+        loop {
+            let now = self.clock.now();
+            match self.rate_limiter()?.try_reserve(&key, now) {
+                Ok(()) => return Ok(()),
+                Err(next_slot) => self.clock.sleep(next_slot.saturating_duration_since(now)),
+            }
         }
     }
 
@@ -589,29 +549,7 @@ impl MonitorService {
     }
 
     pub fn update_settings(&self, settings: AppSettings) -> Result<(), UseCaseError> {
-        if !(150..=2000).contains(&settings.debounce_ms) {
-            return Err(UseCaseError::SettingsInvalid(
-                "debounce must be between 150 and 2000 milliseconds",
-            ));
-        }
-        if settings.input_revert_seconds != 0 && !(5..=60).contains(&settings.input_revert_seconds)
-        {
-            return Err(UseCaseError::SettingsInvalid(
-                "input revert must be 0 or between 5 and 60 seconds",
-            ));
-        }
-        if [
-            settings.brightness_step,
-            settings.contrast_step,
-            settings.volume_step,
-        ]
-        .iter()
-        .any(|step| !STEP_RANGE.contains(step))
-        {
-            return Err(UseCaseError::SettingsInvalid(
-                "hotkey steps must be between 1 and 25 percent",
-            ));
-        }
+        settings.validate().map_err(UseCaseError::SettingsInvalid)?;
         self.settings.save(&settings)?;
         Ok(())
     }
@@ -968,7 +906,7 @@ fn target_native(capability: &ControlCapability, value: ControlValue) -> Result<
     })
 }
 
-impl Api for MonitorService {
+impl ControlApi for MonitorService {
     fn list_monitors(&self) -> Result<Vec<Monitor>, UseCaseError> {
         MonitorService::list_monitors(self)
     }
@@ -1002,7 +940,9 @@ impl Api for MonitorService {
     fn flush_pending_adjustments(&self) -> Result<(usize, Option<Duration>), UseCaseError> {
         MonitorService::flush_pending_adjustments(self)
     }
+}
 
+impl SettingsApi for MonitorService {
     fn settings(&self) -> Result<AppSettings, UseCaseError> {
         MonitorService::settings(self)
     }
@@ -1010,7 +950,9 @@ impl Api for MonitorService {
     fn update_settings(&self, settings: AppSettings) -> Result<(), UseCaseError> {
         MonitorService::update_settings(self, settings)
     }
+}
 
+impl PresetApi for MonitorService {
     fn list_presets(&self) -> Result<Vec<Preset>, UseCaseError> {
         MonitorService::list_presets(self)
     }
@@ -1072,7 +1014,9 @@ impl Api for MonitorService {
     fn presets_location(&self) -> String {
         MonitorService::presets_location(self)
     }
+}
 
+impl HotkeyApi for MonitorService {
     fn list_hotkeys(&self) -> Result<Vec<HotkeyBinding>, UseCaseError> {
         MonitorService::list_hotkeys(self)
     }

@@ -6,8 +6,8 @@ pub mod text;
 
 use dispcontrol_app::{Api, ApplyReport, HotkeyOutcome, ImportSummary, UseCaseError};
 use dispcontrol_domain::{
-    AppSettings, ControlKey, ControlReading, ControlValue, HotkeyBinding, KeyCombo, Monitor,
-    MonitorId, Preset, PresetEntry,
+    AppSettings, ControlKey, ControlReading, ControlValue, HotkeyAction, HotkeyBinding, KeyCombo,
+    Monitor, MonitorId, Preset, PresetEntry,
 };
 
 const CONTROLS: [ControlKey; 9] = [
@@ -232,16 +232,69 @@ impl MonitorSettingsModel {
         self.refresh_hotkeys()
     }
 
+    /// The Add form's Action entries: steps, preset actions, the inputs the
+    /// selected monitor offers, and power.
+    pub fn hotkey_choices(&self) -> Vec<HotkeyAction> {
+        let inputs: Vec<u32> = self
+            .available_controls
+            .iter()
+            .find(|reading| reading.capability.key == ControlKey::Input)
+            .map(|reading| reading.capability.enum_values.clone())
+            .unwrap_or_default();
+        text::hotkey_action_choices(&self.presets, &inputs)
+    }
+
+    /// Turns the Add form into a binding: the recorded keys, the chosen
+    /// entry of `hotkey_choices`, and a monitor menu whose first entry is
+    /// "All monitors". Returns a message for the user when it is incomplete.
+    pub fn hotkey_from_form(
+        &self,
+        keys: &str,
+        action: Option<usize>,
+        monitor: Option<usize>,
+    ) -> Result<HotkeyBinding, String> {
+        if keys.trim().is_empty() {
+            return Err("Click the Keys box and press the combination you want to use.".into());
+        }
+        let keys: KeyCombo = keys.parse().map_err(|error| format!("{error}"))?;
+        let action = action
+            .and_then(|index| self.hotkey_choices().into_iter().nth(index))
+            .ok_or_else(|| "Choose what the hotkey does.".to_owned())?;
+        let monitor = match monitor {
+            Some(index) if index > 0 && action.uses_monitor() => self
+                .monitors
+                .get(index - 1)
+                .map(|monitor| monitor.id.clone()),
+            _ => None,
+        };
+        Ok(HotkeyBinding {
+            keys,
+            action,
+            monitor,
+        })
+    }
+
     pub fn hotkeys_using_preset(&self, name: &str) -> Result<Vec<KeyCombo>, UseCaseError> {
         self.api.hotkeys_using_preset(name)
     }
 
-    /// Runs a pressed hotkey and updates the shown values: a step updates
-    /// the selected monitor's value at once (SPEC-WR-1); other actions
-    /// re-read the controls.
+    /// Runs a pressed hotkey and updates the shown values. The UI runs the
+    /// `Api` call on a worker thread and calls `apply_hotkey_outcome` itself.
     pub fn run_hotkey(&mut self, keys: &KeyCombo) -> Result<HotkeyOutcome, UseCaseError> {
         let outcome = self.api.run_hotkey(keys)?;
-        match &outcome {
+        self.apply_hotkey_outcome(&outcome);
+        Ok(outcome)
+    }
+
+    /// The application API, for calls made off the UI thread.
+    pub fn api(&self) -> Arc<dyn Api> {
+        self.api.clone()
+    }
+
+    /// Updates the shown values after a hotkey: a step updates the selected
+    /// monitor's value at once (SPEC-WR-1); other actions re-read the controls.
+    pub fn apply_hotkey_outcome(&mut self, outcome: &HotkeyOutcome) {
+        match outcome {
             HotkeyOutcome::Stepped { control, values } => {
                 let selected = values
                     .iter()
@@ -260,7 +313,6 @@ impl MonitorSettingsModel {
                 let _ = self.after_preset_change();
             }
         }
-        Ok(outcome)
     }
 
     fn after_preset_change(&mut self) -> Result<(), UseCaseError> {

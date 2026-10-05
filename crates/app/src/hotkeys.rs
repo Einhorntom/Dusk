@@ -182,14 +182,7 @@ impl MonitorService {
             .load()?
             .step_for(control)
             .ok_or(DomainError::InvalidNumericCapability(control))?;
-        let pending = self
-            .pending_adjustments
-            .lock()
-            .map_err(|_| {
-                BackendError::Failed("pending monitor adjustments are unavailable".into())
-            })?
-            .get(&(monitor.clone(), control))
-            .map(|adjustment| adjustment.value);
+        let pending = self.write_buffer()?.target(&(monitor.clone(), control));
         let current = match pending {
             Some(ControlValue::Normalized(value)) => value,
             _ => match self.read(monitor, control)?.value {
