@@ -15,6 +15,7 @@ embed-resource = "3"
 dispcontrol-app = { path = "../app" }
 dispcontrol-ddc-fake = { path = "../ddc-fake" }
 dispcontrol-ddc-windows = { path = "../ddc-windows" }
+dispcontrol-panel-windows = { path = "../panel-windows" }
 dispcontrol-ipc = { path = "../ipc" }
 dispcontrol-store-file = { path = "../store-file" }
 dispcontrol-ui-win32 = { path = "../ui-win32" }

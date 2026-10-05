@@ -29,6 +29,7 @@ RULES = {
     # The CLI is a client of the daemon, so it reaches it through `ipc`.
     "dispcontrol-cli": INNER | {"dispcontrol-ipc", "serde_json", "clap"},
     "dispcontrol-ddc-windows": INNER | {"dispcontrol-mccs", "windows"},
+    "dispcontrol-panel-windows": INNER | {"windows"},
     "dispcontrol-store-file": INNER | {"serde", "toml", "windows"},
     "dispcontrol-ui-win32": INNER | {"dispcontrol-ui-model", "windows"},
     "dispcontrol-bin-cli": ANY,

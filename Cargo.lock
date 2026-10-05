@@ -42,6 +42,7 @@ dependencies = [
  "dispcontrol-ddc-fake",
  "dispcontrol-ddc-windows",
  "dispcontrol-ipc",
+ "dispcontrol-panel-windows",
  "dispcontrol-store-file",
  "dispcontrol-ui-win32",
  "embed-resource",
@@ -97,6 +98,16 @@ dependencies = [
 [[package]]
 name = "dispcontrol-mccs"
 version = "0.1.0"
+
+[[package]]
+name = "dispcontrol-panel-windows"
+version = "0.1.0"
+dependencies = [
+ "dispcontrol-app",
+ "dispcontrol-ddc-fake",
+ "dispcontrol-domain",
+ "windows",
+]
 
 [[package]]
 name = "dispcontrol-store-file"

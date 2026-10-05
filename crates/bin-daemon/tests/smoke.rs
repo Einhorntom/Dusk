@@ -57,6 +57,14 @@ fn the_daemon_serves_cli_requests_end_to_end() {
         }
     };
     assert_eq!(listed["result"][0]["id"], "Demo-monitor");
+    assert_eq!(listed["result"][1]["name"], "Built-in display");
+
+    // The built-in display takes part like any monitor (SPEC-PNL-3).
+    cli(&["--json", "set", "Built-in-display", "brightness", "35"]).unwrap();
+    let panel = cli(&["--json", "get", "Built-in-display", "brightness"]).unwrap();
+    assert_eq!(panel["result"]["value"], "35");
+    let contrast = cli(&["--json", "get", "Built-in-display", "contrast"]).unwrap_err();
+    assert_eq!(contrast.exit_code, 2);
 
     cli(&["--json", "set", "Demo-monitor", "brightness", "70"]).unwrap();
     let reading = cli(&["--json", "get", "Demo-monitor", "brightness"]).unwrap();

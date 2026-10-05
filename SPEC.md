@@ -6,7 +6,7 @@ The spec is monitor-model independent: nothing here hard-codes ranges, input nam
 Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID for test traceability.
 
 ## 1. Terminology
-- **Monitor**: a connected display that responds to control commands.
+- **Monitor**: a connected display that responds to control commands, including the laptop's built-in display (section 3.1).
 - **Control**: an adjustable monitor setting (see 2).
 - **Preset**: a named set of control values for one or more monitors.
 - **Rule**: a schedule entry that applies a preset at a time of day.
@@ -41,8 +41,16 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-MON-1: Each monitor has a stable ID derived from model and serial number. If unavailable, fall back to model + connection position and flag as "unstable ID".
 - SPEC-MON-2: Monitors are addressable by ID, by a user-assigned alias, or by index in the CLI.
 - SPEC-MON-3: The app MUST detect monitor connect/disconnect and wake from sleep, and refresh its monitor list within 3 seconds.
-- SPEC-MON-4: A command to a monitor that does not answer MUST time out (default 2 s, with up to 3 attempts) and report "not responding". It MUST NOT block other monitors, the UI, or hotkeys. A display that Windows cannot open for DDC/CI (such as a laptop panel) is left out of the monitor list instead of making the listing fail.
+- SPEC-MON-4: A command to a monitor that does not answer MUST time out (default 2 s, with up to 3 attempts) and report "not responding". It MUST NOT block other monitors, the UI, or hotkeys. A display that Windows cannot open for DDC/CI (such as a laptop panel) is left out of the DDC/CI monitor list instead of making the listing fail; the built-in display is listed through section 3.1 instead.
 - SPEC-MON-5: Any monitor that supports the standard monitor-control interface is supported through discovery (section 2). Monitors that were not verified by the project are labeled "unverified" in the UI and `list` output; a project-maintained list records verified models (initially the L32p-30).
+
+### 3.1 Built-in display
+- SPEC-PNL-1: On Windows, the laptop's built-in display is listed as a monitor named "Built-in display" (ID `Built-in-display`; a second one, if any, gets a `#n` suffix) whenever Windows reports an active, adjustable brightness for it.
+- SPEC-PNL-2: It exposes `brightness` only, 0-100, mapped to the brightness levels Windows reports. No other control is offered (SPEC-CTL-1).
+- SPEC-PNL-3: It takes part in everything other monitors do: the Settings window, presets (capture and apply), hotkeys including "all monitors", the CLI and integrations.
+- SPEC-PNL-4: Its brightness is not stored in monitor memory, so the write-rate limits (SPEC-WR-6) do not apply. The quiet period (SPEC-WR-2, SPEC-WR-3) and skipping unchanged values (SPEC-WR-4) still do.
+- SPEC-PNL-5: Windows and the user may also change the brightness (brightness keys, adaptive brightness, battery saver). The app reads it on demand (SPEC-WR-8) and never re-applies a value on its own; applying a preset sets it once.
+- SPEC-PNL-6: While the built-in display is off (for example, lid closed), it is not listed and that is not an error; preset entries for it are skipped like those for any absent monitor (SPEC-PRE-3).
 
 ## 4. Writing and monitor-memory protection
 - SPEC-WR-1: User adjustments (slider drag, repeated hotkey, CLI `set`) update an in-memory target value immediately; the UI shows it instantly.
@@ -50,7 +58,7 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-WR-3: Only the latest target is committed; intermediate values are discarded.
 - SPEC-WR-4: A commit MUST be skipped if the target equals the last known monitor value.
 - SPEC-WR-5: The app MUST NOT write to a monitor at startup, at exit, on monitor refresh, or while only reading.
-- SPEC-WR-6: Per monitor and control, commits are limited to 1 per second and 30 per minute. Excess changes are held (latest wins) and applied when the limit allows; a warning is logged.
+- SPEC-WR-6: Per monitor and control, commits are limited to 1 per second and 30 per minute (not for the built-in display, SPEC-PNL-4). Excess changes are held (latest wins) and applied when the limit allows; a warning is logged.
 - SPEC-WR-7: CLI `set` and preset apply are explicit user actions: they commit without the quiet period, but still follow SPEC-WR-4 and SPEC-WR-6.
 - SPEC-WR-8: Reads happen only on demand (opening the panel, `get`, `list`, after wake); no periodic polling.
 - SPEC-WR-9 (live preview): when enabled in settings (default **off**), during a drag the app MAY commit intermediate values at most 4 times per second per control. The final value is still committed per SPEC-WR-2. Enabling shows a one-time notice about wear risk and requires acknowledgment.
@@ -148,9 +156,9 @@ Exit codes: `0` success; `1` general error; `2` invalid usage or value; `3` moni
 - SPEC-NFR-4: The app MUST recover from monitor, driver and sleep/wake errors without restart.
 
 ## 14. Platform scope
-- Windows 11 (x64): everything above, delivered in releases: v0 = controls, safety, Settings window (implemented pages only, SPEC-UI), tray, CLI; v1 = presets, hotkeys, integrations; v2 = scheduling. Reference test hardware: Lenovo L32p-30 over USB-C on Intel Iris Xe Graphics; other monitors work through discovery, other graphics hardware is a future goal.
+- Windows 11 (x64): everything above, delivered in releases: v0 = controls, safety, Settings window (implemented pages only, SPEC-UI), tray, CLI; v1 = presets, hotkeys, built-in display brightness (section 3.1), integrations; v2 = scheduling. Reference test hardware: Lenovo L32p-30 over USB-C on Intel Iris Xe Graphics, and that laptop's built-in display; other monitors work through discovery, other graphics hardware is a future goal.
 - The Settings window lists only pages for features present in the installed release; Presets and Hotkeys appear in v1, Schedule in v2. Ubuntu Settings window: future.
-- Ubuntu (v3): monitor control uses `ddcutil`. CLI, scheduling and presets (sections 2-7 and 10, 12); tray, hotkeys and on-screen indicator are best effort. Global hotkeys where the desktop allows, otherwise through desktop shortcuts calling the CLI.
+- Ubuntu (v3): monitor control uses `ddcutil`. CLI, scheduling and presets (sections 2-7 and 10, 12); tray, hotkeys and on-screen indicator are best effort. Built-in display brightness on Ubuntu is a future feature. Global hotkeys where the desktop allows, otherwise through desktop shortcuts calling the CLI.
 
 ## 15. Acceptance criteria (summary)
 1. On the reference hardware (L32p-30, USB-C, Intel Iris Xe), every control the monitor reports can be read and set, and numeric values round-trip per SPEC-CTL-3. On a monitor that reports fewer controls, only those are offered and nothing fails.

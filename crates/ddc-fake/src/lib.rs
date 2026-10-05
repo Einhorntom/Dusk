@@ -55,6 +55,17 @@ impl FakeMonitor {
             .enumerated(ControlKey::Power, 0x01, &[0x01, 0x04, 0x05])
     }
 
+    /// A laptop's built-in display: brightness only, not rate-limited
+    /// (SPEC-PNL-2, SPEC-PNL-4).
+    pub fn built_in(id: &str) -> Self {
+        let mut monitor = Self::new(id).numeric(ControlKey::Brightness, 40, 100);
+        monitor.info.name = "Built-in display".into();
+        for (capability, _) in monitor.controls.values_mut() {
+            capability.rate_limited = false;
+        }
+        monitor
+    }
+
     pub fn id(&self) -> &MonitorId {
         &self.info.id
     }
@@ -67,6 +78,7 @@ impl FakeMonitor {
             native_min: 0,
             native_max: max,
             enum_values: Vec::new(),
+            rate_limited: true,
         };
         self.controls.insert(control, (capability, value));
         self
@@ -80,6 +92,7 @@ impl FakeMonitor {
             native_min: 0,
             native_max: 0,
             enum_values: values.to_vec(),
+            rate_limited: true,
         };
         self.controls.insert(control, (capability, value));
         self

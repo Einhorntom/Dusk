@@ -4,12 +4,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dispcontrol_app::{
-    Clock, HotkeyRepository, MonitorBackend, MonitorService, PresetRepository, SettingsRepository,
-    TimedBackend,
+    Clock, CompositeBackend, HotkeyRepository, MonitorBackend, MonitorService, PresetRepository,
+    SettingsRepository, TimedBackend,
 };
 use dispcontrol_ddc_fake::{FakeBackend, FakeMonitor};
 use dispcontrol_ddc_windows::WindowsDdcBackend;
 use dispcontrol_ipc::dispatch;
+use dispcontrol_panel_windows::PanelBackend;
 use dispcontrol_store_file::FileSettingsRepository;
 
 struct DesktopClock;
@@ -69,10 +70,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(path) => path,
         None => FileSettingsRepository::default_path()?,
     };
+    // External monitors over DDC/CI plus the built-in display (SPEC-PNL).
     let monitors: Arc<dyn MonitorBackend> = if options.demo {
-        Arc::new(FakeBackend::single(FakeMonitor::reference("Demo-monitor")))
+        Arc::new(FakeBackend::new([
+            FakeMonitor::reference("Demo-monitor"),
+            FakeMonitor::built_in("Built-in-display"),
+        ]))
     } else {
-        Arc::new(WindowsDdcBackend::new())
+        Arc::new(CompositeBackend::new(vec![
+            Arc::new(WindowsDdcBackend::new()),
+            Arc::new(PanelBackend::new()),
+        ]))
     };
     // Every DDC/CI call runs on a per-monitor worker with a timeout (SPEC-MON-4).
     let backend = Arc::new(TimedBackend::with_defaults(monitors));

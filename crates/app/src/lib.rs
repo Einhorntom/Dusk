@@ -15,7 +15,10 @@ mod hotkeys;
 
 pub use hotkeys::{HotkeyOutcome, HotkeyRepository};
 
+mod composite;
 mod timed;
+
+pub use composite::CompositeBackend;
 
 pub use timed::{DEFAULT_ATTEMPTS, DEFAULT_TIMEOUT, TimedBackend};
 
@@ -295,6 +298,12 @@ pub struct MonitorService {
 
 type WriteKey = (MonitorId, ControlKey);
 
+/// A preset entry that must be written.
+struct PlannedWrite {
+    native: u32,
+    rate_limited: bool,
+}
+
 fn locked<'a, T>(
     mutex: &'a Mutex<T>,
     what: &str,
@@ -393,7 +402,9 @@ impl MonitorService {
             return Err(UseCaseError::InputChangeDeclined);
         }
 
-        self.wait_for_write_slot(monitor, control)?;
+        if capability.rate_limited {
+            self.wait_for_write_slot(monitor, control)?;
+        }
         self.backend.write_control(monitor, control, native)?;
         if control == ControlKey::Input && settings.input_revert_seconds > 0 {
             let monitor_info = monitor_info
@@ -479,7 +490,9 @@ impl MonitorService {
             if native == previous_native {
                 continue;
             }
-            if let Err(next_slot) = self.rate_limiter()?.try_reserve(&target.key, now) {
+            if capability.rate_limited
+                && let Err(next_slot) = self.rate_limiter()?.try_reserve(&target.key, now)
+            {
                 if !target.deferred {
                     eprintln!("warning: monitor write rate limit deferred {control} for {monitor}");
                 }
@@ -518,14 +531,17 @@ impl MonitorService {
         &self,
         entry: &PresetEntry,
         force: bool,
-    ) -> Result<Option<u32>, UseCaseError> {
+    ) -> Result<Option<PlannedWrite>, UseCaseError> {
         let (capability, current) = self
             .backend
             .read_control(&entry.monitor, entry.control)?
             .ok_or(UseCaseError::UnsupportedControl(entry.control))?;
         let native = target_native(&capability, entry.value)?;
         self.discard_pending_adjustment(&entry.monitor, entry.control)?;
-        Ok((force || native != current).then_some(native))
+        Ok((force || native != current).then_some(PlannedWrite {
+            native,
+            rate_limited: capability.rate_limited,
+        }))
     }
 
     /// Blocks until the rate limit allows a write (explicit writes, SPEC-WR-7).
@@ -781,11 +797,11 @@ impl MonitorService {
                 // written even if they matched before the switch.
                 let force = mode_switch.contains(&entry.monitor);
                 match self.plan_preset_write(entry, force) {
-                    Ok(Some(native)) => {
+                    Ok(Some(planned)) => {
                         if entry.control == ControlKey::ColorPreset {
                             mode_switch.push(entry.monitor.clone());
                         }
-                        writes.push((index, native));
+                        writes.push((index, planned));
                         statuses.push(None);
                         continue;
                     }
@@ -797,15 +813,18 @@ impl MonitorService {
         }
 
         let last_write = writes.len();
-        for (position, (index, native)) in writes.into_iter().enumerate() {
+        for (position, (index, planned)) in writes.into_iter().enumerate() {
             let entry = &entries[index];
-            let result = self
-                .wait_for_write_slot(&entry.monitor, entry.control)
-                .and_then(|()| {
-                    Ok(self
-                        .backend
-                        .write_control(&entry.monitor, entry.control, native)?)
-                });
+            let slot = if planned.rate_limited {
+                self.wait_for_write_slot(&entry.monitor, entry.control)
+            } else {
+                Ok(())
+            };
+            let result = slot.and_then(|()| {
+                Ok(self
+                    .backend
+                    .write_control(&entry.monitor, entry.control, planned.native)?)
+            });
             statuses[index] = Some(match result {
                 Ok(()) => EntryStatus::Applied,
                 Err(error) => EntryStatus::Failed(error.to_string()),

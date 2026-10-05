@@ -132,6 +132,9 @@ pub struct ControlCapability {
     pub native_min: u32,
     pub native_max: u32,
     pub enum_values: Vec<u32>,
+    /// Writes go to the monitor's non-volatile memory, so commits follow the
+    /// write-rate limits (SPEC-WR-6). False for the built-in display (SPEC-PNL-4).
+    pub rate_limited: bool,
 }
 
 impl ControlCapability {
@@ -393,6 +396,7 @@ mod tests {
             native_min: 20,
             native_max: 100,
             enum_values: vec![],
+            rate_limited: true,
         };
         for value in 0..=100 {
             let native = capability.normalized_to_native(value).unwrap();
@@ -413,6 +417,7 @@ mod tests {
             native_min: 0,
             native_max: 0,
             enum_values: vec![0x11, 0x0f, 0x31],
+            rate_limited: true,
         };
         assert!(capability.validate_enum(0x31).is_ok());
         assert!(capability.validate_enum(0x99).is_err());

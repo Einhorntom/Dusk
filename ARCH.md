@@ -107,6 +107,7 @@ dispcontrol/
     cli/               argument parsing and presentation               (layer 3)
     ddc-fake/          simulated monitors for tests and demos          (layer 3)
     ddc-windows/       MonitorBackend over Dxva2                       (layer 4)
+    panel-windows/     MonitorBackend for the built-in display (WMI)   (layer 4)
     ddc-linux/         MonitorBackend over /dev/i2c-*                  (layer 4)
     store-file/        ConfigRepository, QuirkRepository, caches       (layer 4)
     ui-win32/          tray, panel, settings, OSD, hotkeys, prompts    (layer 4)
@@ -127,7 +128,7 @@ Allowed dependencies (everything else is forbidden):
 | `domain` | `std` only (plus tiny pure utility crates, e.g. a `thiserror`-style macro) |
 | `app` | `domain`, `std`, the `log` facade |
 | `mccs`, `ui-model`, `ipc`, `cli`, `ddc-fake` | `domain`, `app`; `ipc` and `cli` may use `serde_json`/`clap`-class parsing crates; `cli` uses `ipc` (it is a daemon client). Exception: `ipc` uses `windows` for its Windows-only named-pipe transport, until that moves into its own adapter crate. |
-| `ddc-windows`, `ddc-linux`, `store-file`, `ui-win32` | `domain`, `app`, `mccs`/`ui-model` as needed, and their OS or format crates (`windows`, `toml`, ...) |
+| `ddc-windows`, `ddc-linux`, `panel-windows`, `store-file`, `ui-win32` | `domain`, `app`, `mccs`/`ui-model` as needed, and their OS or format crates (`windows`, `toml`, ...) |
 | `bin-*` | anything (composition roots) |
 
 How the component principles are met:
@@ -142,7 +143,7 @@ How the component principles are met:
 Pure data and rules; time and randomness are always passed in.
 - **Identifiers and values:** `MonitorId` (from EDID manufacturer + model + serial, with an "unstable" flag when the serial is missing), `ControlKey` (`Brightness`, `Contrast`, `Volume`, `Input`, `Power`, `ColorPreset`, `GainRed/Green/Blue`), `Percent` (0-100 newtype), `NativeRange {min,max}`, `EnumKey` (canonical key such as `hdmi1`, `usbc`, or `raw-<code>`).
 - **Normalization (SPEC-CTL-3):** `NativeRange::to_percent` / `from_percent`, deterministic and round-trip safe.
-- **Capabilities:** per control either `Level(NativeRange)` or `Choice(Vec<(EnumKey, NativeValue)>)`; plus a `source` (`Reported` or `Probed`) and an applied-quirk marker.
+- **Capabilities:** per control either `Level(NativeRange)` or `Choice(Vec<(EnumKey, NativeValue)>)`; plus a `source` (`Reported` or `Probed`) and an applied-quirk marker. `ControlCapability::rate_limited` says whether writes go to monitor memory and so follow SPEC-WR-6 (false for the built-in display, SPEC-PNL-4).
 - **Quirk profile:** plain data type (capability overrides, timing, retry hints) (SPEC-QRK).
 - **Preset and entries:** `{monitor, control, value}` using normalized values and `EnumKey`s; `apply_order` (SPEC-PRE-4) and `diff(preset, current_state)` returning only entries that must be written (SPEC-PRE-3, SPEC-WR-4).
 - **Schedule:** `Rule {time, days, preset, enabled}`; pure functions `next_trigger(now_local, rules)` and `most_recent_missed(now_local, rules, last_applied)` (SPEC-SCH-2/3/6/7).
@@ -289,6 +290,10 @@ dispcontrol set brightness 40
 
 **`ddc-linux`:** ddcutil-compatible access through `/dev/i2c-*` (requires the `i2c-dev` module and group permission). Decided: it uses `ddcutil` (invoked as a subprocess behind the same `MonitorBackend` port; the package is a declared dependency of the Ubuntu package). A native implementation is a possible later replacement without core changes.
 
+**`panel-windows` (SPEC-PNL):** the laptop's built-in display through WMI in the `root\WMI` namespace: `WmiMonitorBrightness` (active instances, `CurrentBrightness`, `Level` list) for reads and `WmiMonitorBrightnessMethods.WmiSetBrightness` for writes, over COM from the `windows` crate. It reports one numeric `brightness` capability with `rate_limited = false` (SPEC-PNL-4); every other control reads as unsupported. Monitors are named "Built-in display".
+
+**Combining backends:** `app::CompositeBackend` merges several `MonitorBackend`s into one: it lists the monitors of all of them and routes each read or write to the backend that listed that monitor. The daemon runs `TimedBackend(CompositeBackend[ddc-windows, panel-windows])`, so the built-in display gets the same per-monitor worker and timeout as external monitors, and nothing above the port knows which kind a monitor is.
+
 **`ddc-fake`:** configurable simulated monitors (capabilities, scripted read/write failures, disconnects; latency and hangs are not simulated yet) plus in-memory doubles of the other ports (settings, presets with an export/import round trip, a scripted input prompter, a manual clock) and a `Harness` that wires them into a `MonitorService`. Used by the `app`, `ipc`, `cli` and `ui-model` tests and for demos.
 
 ### 9.2 Persistence (`store-file`)
@@ -378,6 +383,7 @@ Do not duplicate the same assertion at every layer. Put each rule at the lowest 
 |---|---|
 | SPEC-CTL, SPEC-QRK | `domain` (capabilities, normalization, quirk type), `mccs`, `ddc-*`, `app::discover` |
 | SPEC-MON | `app::monitors` + `MonitorBackend`, system events in `ui-win32`/`bin-daemon`, per-monitor workers |
+| SPEC-PNL | `panel-windows`, `app::CompositeBackend`, `ControlCapability::rate_limited` |
 | SPEC-WR | `domain::write_policy`, `app::adjust/set`, `AuditStore` |
 | SPEC-IN | `domain::input_safety`, `app::change_input`, `Prompter` |
 | SPEC-PRE | `domain::preset`, `app::presets` |

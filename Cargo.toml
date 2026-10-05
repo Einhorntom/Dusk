@@ -5,6 +5,7 @@ members = [
     "crates/ddc-fake",
     "crates/mccs",
     "crates/ddc-windows",
+    "crates/panel-windows",
     "crates/ipc",
     "crates/store-file",
     "crates/cli",

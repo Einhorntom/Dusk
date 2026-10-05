@@ -1,7 +1,7 @@
 # PRD: dispcontrol
 
-A lightweight, open-source tool for controlling an external monitor from the desktop: quickly, with hotkeys, presets and schedules.
-Status: Draft v0.4. Design and technology notes live in [ARCH.md](./ARCH.md).
+A lightweight, open-source tool for controlling external monitors and the laptop's built-in display from the desktop: quickly, with hotkeys, presets and schedules.
+Status: Draft v0.5. Design and technology notes live in [ARCH.md](./ARCH.md).
 
 ## 1. Problem
 Lenovo Display Control Center is unreliable, and ClickMonitorDDC is no longer maintained. Users need a fast, tiny, dependable way to change external-monitor settings and jump between saved setups.
@@ -9,6 +9,7 @@ Lenovo Display Control Center is unreliable, and ClickMonitorDDC is no longer ma
 ## 2. Target user and hardware
 - A single power user with an external monitor, working on Windows 11 (primary) and Ubuntu (secondary).
 - Supported hardware (v0 and later until extended): **Lenovo L32p-30**, connected directly over **USB-C**, also used as the USB hub, on a PC with **Intel Iris Xe Graphics**.
+- From v1: the **laptop's built-in display** on that PC (brightness, through Windows).
 - Other monitors and graphics hardware may work but are not supported yet (see Future features).
 
 ## 3. Goals
@@ -19,9 +20,10 @@ Lenovo Display Control Center is unreliable, and ClickMonitorDDC is no longer ma
 5. Windows 11 first; Ubuntu support as a secondary target.
 6. Protect the monitor's memory from wear: apply changes only once the user has finished adjusting.
 7. Automatic preset switching at fixed times of day.
+8. Control the laptop's built-in display brightness together with the external monitors, in the same presets, hotkeys and commands.
 
 ## 4. Non-goals (for now)
-- Laptop internal-panel brightness; software dimming overlays.
+- Software dimming overlays.
 - Monitor firmware updates or vendor-specific features.
 - Sunrise/sunset-based scheduling.
 - Multi-user or enterprise management.
@@ -31,6 +33,8 @@ Lenovo Display Control Center is unreliable, and ClickMonitorDDC is no longer ma
 
 ### 5.1 Controls
 Brightness, contrast, input source, volume, power mode (on/standby), color preset, and RGB gain. Only controls the monitor actually supports are shown.
+
+The laptop's built-in display offers brightness (it has no other monitor controls). It appears as "Built-in display" next to the external monitors and works with presets, hotkeys, the command line and integrations like any other monitor. Windows keeps changing it too (brightness keys, adaptive brightness, battery saver); the app does not fight those changes.
 
 ### 5.2 Monitor handling
 - Presets stay bound to the right monitor even if it is unplugged, re-plugged or reordered.
@@ -66,7 +70,7 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 - While a slider is dragged or a hotkey is held, changes are only buffered.
 - The monitor is updated once, after the user stops adjusting (default 400 ms, configurable).
 - Unchanged values are never rewritten, and nothing is written at app startup or exit.
-- Writes are rate-limited per setting.
+- Writes are rate-limited per setting. (The built-in display's brightness is not stored in monitor memory, so it is not rate-limited; it is still only updated once the user stops adjusting.)
 - **Live preview** (monitor updating during the drag) is **off by default** and can be enabled in settings, with a one-time notice about the wear risk.
 - An optional audit log shows how many writes were made per setting.
 
@@ -107,7 +111,7 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 ## 9. Release plan
 - **Phase 0 (spike)**: Prove the L32p-30 can be read and controlled over USB-C on Intel Iris Xe (brightness, input, volume).
 - **v0 (first release, Windows 11)**: Background app with tray icon; Settings window showing only what is implemented (monitor controls, safety and write settings, general settings); confirmation for input changes; memory-protecting writes; command line (works while the app runs).
-- **v1**: Presets and hotkeys (tray panel, Presets and Hotkeys pages in Settings), PowerToys Run and Command Palette integrations.
+- **v1**: Presets and hotkeys (tray panel, Presets and Hotkeys pages in Settings), then built-in display brightness, then PowerToys Run and Command Palette integrations.
 - **v2**: Scheduling (Schedule page in Settings).
 - **v3**: Ubuntu support using `ddcutil` (command line, presets, scheduling first); on-screen indicator, installer, package-manager release, documentation as they become ready.
 - The Settings window only shows pages for features that exist in the installed release.
@@ -118,7 +122,7 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 - Settings window and full tray UI on Ubuntu; other Linux desktops (KDE) and distributions; macOS.
 - Per-application or per-window automatic presets.
 - Software dimming fallback for monitors without DDC/CI support.
-- Laptop internal-panel brightness control.
+- Built-in display brightness on Ubuntu.
 - Preset import/export and sharing.
 - Syncing brightness across multiple monitors.
 - Reliable handling of multiple identical monitors (same model, no serial): stable aliases and sync rules.
@@ -134,6 +138,7 @@ Brightness, contrast, input source, volume, power mode (on/standby), color prese
 7. Live preview: off by default, opt-in.
 8. Any input change away from the currently active input requires confirmation by default.
 9. Minimizing an app window sends it to the hidden-icons tray overflow, not the taskbar.
+10. Built-in display: brightness only, through Windows; a monitor like any other for presets, hotkeys and integrations; no write-rate limit; changes made by Windows are respected, not reverted. Delivered in v1, before the PowerToys integrations.
 
 ## 12. Open questions
 - None currently.

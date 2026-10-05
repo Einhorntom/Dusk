@@ -154,6 +154,7 @@ impl MonitorBackend for WindowsDdcBackend {
                 native_min: 0,
                 native_max: maximum,
                 enum_values: vec![],
+                rate_limited: true,
             }
         } else {
             ControlCapability {
@@ -161,6 +162,7 @@ impl MonitorBackend for WindowsDdcBackend {
                 native_min: 0,
                 native_max: 0,
                 enum_values: enum_values.iter().map(|value| u32::from(*value)).collect(),
+                rate_limited: true,
             }
         };
         Ok(Some((capability, current)))
