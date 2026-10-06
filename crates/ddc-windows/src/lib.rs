@@ -1,50 +1,88 @@
+mod identity;
+
 use std::collections::{HashMap, HashSet};
+use std::ffi::c_void;
 use std::io;
 use std::ptr;
 use std::sync::Mutex;
 use windows::Win32::Devices::Display::{
     CapabilitiesRequestAndCapabilitiesReply, DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
-    DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED,
-    DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL, DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS,
-    DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED, DISPLAYCONFIG_PATH_INFO,
-    DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY,
-    DestroyPhysicalMonitor, DisplayConfigGetDeviceInfo, GetCapabilitiesStringLength,
-    GetDisplayConfigBufferSizes, GetNumberOfPhysicalMonitorsFromHMONITOR,
-    GetPhysicalMonitorsFromHMONITOR, GetVCPFeatureAndVCPFeatureReply, MC_VCP_CODE_TYPE,
-    PHYSICAL_MONITOR, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig, SetVCPFeature,
+    DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_MODE_INFO,
+    DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED, DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL,
+    DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS, DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED,
+    DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME,
+    DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY, DestroyPhysicalMonitor, DisplayConfigGetDeviceInfo,
+    GetCapabilitiesStringLength, GetDisplayConfigBufferSizes,
+    GetNumberOfPhysicalMonitorsFromHMONITOR, GetPhysicalMonitorsFromHMONITOR,
+    GetVCPFeatureAndVCPFeatureReply, MC_VCP_CODE_TYPE, PHYSICAL_MONITOR, QDC_ONLY_ACTIVE_PATHS,
+    QueryDisplayConfig, SetVCPFeature,
 };
 use windows::Win32::Foundation::{ERROR_NOT_FOUND, ERROR_SUCCESS, LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HMONITOR, MONITORENUMPROC, MONITORINFO, MONITORINFOEXW,
 };
-use windows::core::BOOL;
+use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_BINARY, RegGetValueW};
+use windows::core::{BOOL, PCWSTR};
 
 use dusk_app::{BackendError, MonitorBackend};
 use dusk_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
 use dusk_mccs::{Capabilities, parse_capabilities};
 
-struct PhysicalMonitor {
-    id: MonitorId,
-    name: String,
-    handle: PHYSICAL_MONITOR,
-}
+use identity::{Candidate, assign_ids, device_instance, pair_outputs, parse_edid};
 
-impl Drop for PhysicalMonitor {
+/// A physical-monitor handle, released when dropped.
+struct OwnedPhysical(PHYSICAL_MONITOR);
+
+impl Drop for OwnedPhysical {
     fn drop(&mut self) {
         unsafe {
-            let _ = DestroyPhysicalMonitor(self.handle.hPhysicalMonitor);
+            let _ = DestroyPhysicalMonitor(self.0.hPhysicalMonitor);
         }
     }
 }
 
+struct PhysicalMonitor {
+    id: MonitorId,
+    name: String,
+    unstable_id: bool,
+    /// The ID used before IDs came from the EDID: description and position.
+    legacy_id: MonitorId,
+    /// The monitor's device path (one per connected monitor), or its ID.
+    cache_key: String,
+    handle: OwnedPhysical,
+}
+
+/// One active output of a Windows display (GDI device), from the display
+/// configuration.
+#[derive(Clone)]
+struct DisplayOutput {
+    display: String,
+    technology: DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY,
+    device_path: Option<String>,
+}
+
 #[derive(Default)]
 pub struct WindowsDdcBackend {
-    capability_cache: Mutex<HashMap<MonitorId, Capabilities>>,
+    /// Keyed by device path, so a monitor plugged into another monitor's
+    /// place never gets that monitor's capabilities.
+    capability_cache: Mutex<HashMap<String, Capabilities>>,
 }
 
 impl WindowsDdcBackend {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// `(old, new)` for each connected monitor whose ID changed when IDs
+    /// started to come from the EDID (SPEC-MON-1), so saved presets and
+    /// hotkeys can follow it.
+    pub fn legacy_id_renames(&self) -> Result<Vec<(MonitorId, MonitorId)>, BackendError> {
+        Ok(self
+            .discover()?
+            .into_iter()
+            .filter(|monitor| monitor.legacy_id != monitor.id)
+            .map(|monitor| (monitor.legacy_id.clone(), monitor.id.clone()))
+            .collect())
     }
 
     fn discover(&self) -> Result<Vec<PhysicalMonitor>, BackendError> {
@@ -55,19 +93,32 @@ impl WindowsDdcBackend {
             return Err(last_error("EnumDisplayMonitors"));
         }
 
+        // If Windows cannot report its display paths, nothing is excluded
+        // (listing the panel twice beats hiding a monitor) and IDs fall back
+        // to positions.
+        let outputs = active_outputs().unwrap_or_else(|error| {
+            log::warn!("cannot read the display configuration: {error}");
+            Vec::new()
+        });
         // The built-in display belongs to the panel backend (SPEC-PNL-1), even
         // when Windows lets it be opened for DDC/CI.
-        let built_in = built_in_only_displays();
-        let mut monitors = Vec::new();
+        let built_in = displays_shown_only_on_built_in(
+            &outputs
+                .iter()
+                .map(|output| (output.display.clone(), output.technology))
+                .collect::<Vec<_>>(),
+        );
+        let mut found: Vec<(OwnedPhysical, Option<DisplayOutput>)> = Vec::new();
         for display_handle in display_handles {
-            if gdi_device_name(display_handle).is_some_and(|name| built_in.contains(&name)) {
+            let display = gdi_device_name(display_handle);
+            if display.as_ref().is_some_and(|name| built_in.contains(name)) {
                 continue;
             }
             let mut physical_count = 0;
             if let Err(error) = unsafe {
                 GetNumberOfPhysicalMonitorsFromHMONITOR(display_handle, &mut physical_count)
             } {
-                eprintln!("warning: cannot enumerate physical monitors: {error}");
+                log::warn!("cannot enumerate physical monitors: {error}");
                 continue;
             }
             if physical_count == 0 {
@@ -89,24 +140,53 @@ impl WindowsDdcBackend {
                 // which has no DDC/CI) must not hide the others. Windows
                 // reports that case as "element not found".
                 if error.code() != ERROR_NOT_FOUND.to_hresult() {
-                    eprintln!(
-                        "warning: skipping a display: GetPhysicalMonitorsFromHMONITOR: {error}"
-                    );
+                    log::warn!("skipping a display: GetPhysicalMonitorsFromHMONITOR: {error}");
                 }
                 continue;
             }
 
-            for handle in physical {
-                let description = description(&handle);
-                let index = monitors.len();
-                let id = MonitorId::new(format!("{description}#{index}"))
-                    .map_err(|error| BackendError::Failed(error.to_string()))?;
-                monitors.push(PhysicalMonitor {
-                    id,
-                    name: description,
-                    handle,
-                });
-            }
+            let own_outputs: Vec<DisplayOutput> = outputs
+                .iter()
+                .filter(|output| display.as_ref() == Some(&output.display))
+                .cloned()
+                .collect();
+            let paired = pair_outputs(physical.len(), &own_outputs, |output| {
+                !is_built_in_output(output.technology)
+            });
+            found.extend(physical.into_iter().map(OwnedPhysical).zip(paired));
+        }
+
+        let mut descriptions = Vec::new();
+        let mut candidates = Vec::new();
+        for (handle, output) in &found {
+            let description = description(&handle.0);
+            let edid = output
+                .as_ref()
+                .and_then(|output| output.device_path.as_deref())
+                .and_then(device_instance)
+                .and_then(|instance| read_edid(&instance))
+                .and_then(|bytes| parse_edid(&bytes));
+            candidates.push(Candidate::new(edid.as_ref(), &description));
+            descriptions.push(description);
+        }
+        let ids = assign_ids(&candidates);
+        let monitor_id = |text: String| {
+            MonitorId::new(text).map_err(|error| BackendError::Failed(error.to_string()))
+        };
+        let mut monitors = Vec::new();
+        for (index, ((handle, output), (id, unstable_id))) in found.into_iter().zip(ids).enumerate()
+        {
+            let cache_key = output
+                .and_then(|output| output.device_path)
+                .unwrap_or_else(|| id.clone());
+            monitors.push(PhysicalMonitor {
+                id: monitor_id(id)?,
+                name: candidates[index].name.clone(),
+                unstable_id,
+                legacy_id: monitor_id(format!("{}#{index}", descriptions[index]))?,
+                cache_key,
+                handle,
+            });
         }
         Ok(monitors)
     }
@@ -116,17 +196,17 @@ impl WindowsDdcBackend {
             .capability_cache
             .lock()
             .map_err(|_| BackendError::Failed("capability cache lock is poisoned".into()))?
-            .get(&monitor.id)
+            .get(&monitor.cache_key)
             .cloned()
         {
             return Ok(capabilities);
         }
 
-        let capabilities = read_capabilities(&monitor.handle)?;
+        let capabilities = read_capabilities(&monitor.handle.0)?;
         self.capability_cache
             .lock()
             .map_err(|_| BackendError::Failed("capability cache lock is poisoned".into()))?
-            .insert(monitor.id.clone(), capabilities.clone());
+            .insert(monitor.cache_key.clone(), capabilities.clone());
         Ok(capabilities)
     }
 }
@@ -139,7 +219,7 @@ impl MonitorBackend for WindowsDdcBackend {
                 .map(|item| Monitor {
                     id: item.id.clone(),
                     name: item.name.clone(),
-                    unstable_id: true,
+                    unstable_id: item.unstable_id,
                 })
                 .collect()
         })
@@ -200,7 +280,8 @@ impl MonitorBackend for WindowsDdcBackend {
                 "monitor does not report support for {control}"
             )));
         }
-        let result = unsafe { SetVCPFeature(physical.handle.hPhysicalMonitor, code, native_value) };
+        let result =
+            unsafe { SetVCPFeature(physical.handle.0.hPhysicalMonitor, code, native_value) };
         check_result(result, "SetVCPFeature")
     }
 }
@@ -244,19 +325,7 @@ fn displays_shown_only_on_built_in(
         .collect()
 }
 
-/// Reads the active display paths. If Windows cannot report them, nothing
-/// is excluded: listing the panel twice beats hiding a monitor.
-fn built_in_only_displays() -> HashSet<String> {
-    match active_outputs() {
-        Ok(outputs) => displays_shown_only_on_built_in(&outputs),
-        Err(error) => {
-            eprintln!("warning: cannot identify the built-in display: {error}");
-            HashSet::new()
-        }
-    }
-}
-
-fn active_outputs() -> Result<Vec<(String, DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY)>, String> {
+fn active_outputs() -> Result<Vec<DisplayOutput>, String> {
     let (mut path_count, mut mode_count) = (0, 0);
     let result = unsafe {
         GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count)
@@ -292,12 +361,53 @@ fn active_outputs() -> Result<Vec<(String, DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY
         if result != 0 {
             return Err(format!("DisplayConfigGetDeviceInfo failed: {result}"));
         }
-        outputs.push((
-            wide_to_string(&source.viewGdiDeviceName),
-            path.targetInfo.outputTechnology,
-        ));
+        let mut target = DISPLAYCONFIG_TARGET_DEVICE_NAME::default();
+        target.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+        target.header.size = size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32;
+        target.header.adapterId = path.targetInfo.adapterId;
+        target.header.id = path.targetInfo.id;
+        // Without the device path the monitor is still listed, by position.
+        let device_path = (unsafe { DisplayConfigGetDeviceInfo(&mut target.header) } == 0)
+            .then(|| wide_to_string(&target.monitorDevicePath))
+            .filter(|path| !path.is_empty());
+        outputs.push(DisplayOutput {
+            display: wide_to_string(&source.viewGdiDeviceName),
+            technology: path.targetInfo.outputTechnology,
+            device_path,
+        });
     }
     Ok(outputs)
+}
+
+/// The monitor's EDID, which Windows keeps in its device registry key
+/// (readable without administrator rights).
+fn read_edid(instance: &str) -> Option<Vec<u8>> {
+    let key: Vec<u16> = format!(r"SYSTEM\CurrentControlSet\Enum\{instance}\Device Parameters")
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let value: Vec<u16> = "EDID".encode_utf16().chain(Some(0)).collect();
+    let mut size = 0u32;
+    let query = |data: Option<*mut c_void>, size: &mut u32| unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR(key.as_ptr()),
+            PCWSTR(value.as_ptr()),
+            RRF_RT_REG_BINARY,
+            None,
+            data,
+            Some(size),
+        )
+    };
+    if query(None, &mut size) != ERROR_SUCCESS || size == 0 {
+        return None;
+    }
+    let mut bytes = vec![0u8; size as usize];
+    if query(Some(bytes.as_mut_ptr().cast()), &mut size) != ERROR_SUCCESS {
+        return None;
+    }
+    bytes.truncate(size as usize);
+    Some(bytes)
 }
 
 /// The GDI device name of a Windows display, such as `\\.\DISPLAY1`.
@@ -362,7 +472,7 @@ fn read_vcp(monitor: &PhysicalMonitor, control: ControlKey) -> Result<(u32, u32)
     check_result(
         unsafe {
             GetVCPFeatureAndVCPFeatureReply(
-                monitor.handle.hPhysicalMonitor,
+                monitor.handle.0.hPhysicalMonitor,
                 control.vcp_code(),
                 Some(&mut kind),
                 &mut current,

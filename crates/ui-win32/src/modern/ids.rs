@@ -17,6 +17,7 @@ const REVERT_SLIDER: u16 = 1501;
 const REVERT_VALUE: u16 = 1601;
 const INLINE_EDIT: u16 = 1900;
 const CONFIRM_TOGGLE: u16 = 2000;
+const LOG_TOGGLE: u16 = 2001;
 const PRESET_NAME: u16 = 2050;
 const PRESET_SAVE: u16 = 2051;
 const PRESET_SAVE_INPUT: u16 = 2052;
@@ -93,6 +94,7 @@ pub(crate) enum Control {
     DebounceValue,
     InlineEdit,
     ConfirmToggle,
+    LogToggle,
     PresetName,
     PresetSave,
     PresetSaveInput,
@@ -114,7 +116,7 @@ pub(crate) enum Control {
     StepValue(usize),
 }
 
-const FIXED: [(Control, u16); 17] = [
+const FIXED: [(Control, u16); 18] = [
     (Control::RevertSlider, REVERT_SLIDER),
     (Control::RevertValue, REVERT_VALUE),
     (
@@ -123,6 +125,7 @@ const FIXED: [(Control, u16); 17] = [
     ),
     (Control::InlineEdit, INLINE_EDIT),
     (Control::ConfirmToggle, CONFIRM_TOGGLE),
+    (Control::LogToggle, LOG_TOGGLE),
     (Control::PresetName, PRESET_NAME),
     (Control::PresetSave, PRESET_SAVE),
     (Control::PresetSaveInput, PRESET_SAVE_INPUT),

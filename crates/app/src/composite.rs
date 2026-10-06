@@ -67,7 +67,7 @@ impl MonitorBackend for CompositeBackend {
                     }
                 }
                 Err(error) => {
-                    eprintln!("warning: a monitor backend could not list monitors: {error}");
+                    log::warn!("a monitor backend could not list monitors: {error}");
                     first_error.get_or_insert(error);
                 }
             }

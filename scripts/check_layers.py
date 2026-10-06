@@ -25,13 +25,13 @@ RULES = {
     "dusk-ui-model": INNER,
     "dusk-ddc-fake": INNER,
     # Exception (ARCH 5.3): `windows` for the Windows-only named-pipe transport.
-    "dusk-ipc": INNER | {"serde", "serde_json", "windows"},
+    "dusk-ipc": INNER | {"log", "serde", "serde_json", "windows"},
     # The CLI is a client of the daemon, so it reaches it through `ipc`.
     "dusk-cli": INNER | {"dusk-ipc", "serde_json", "clap"},
-    "dusk-ddc-windows": INNER | {"dusk-mccs", "windows"},
-    "dusk-panel-windows": INNER | {"windows"},
-    "dusk-store-file": INNER | {"serde", "toml", "windows"},
-    "dusk-ui-win32": INNER | {"dusk-ui-model", "windows"},
+    "dusk-ddc-windows": INNER | {"dusk-mccs", "log", "windows"},
+    "dusk-panel-windows": INNER | {"log", "windows"},
+    "dusk-store-file": INNER | {"log", "serde", "toml", "windows"},
+    "dusk-ui-win32": INNER | {"dusk-ui-model", "log", "windows"},
     "dusk-bin-cli": ANY,
     "dusk-bin-daemon": ANY,
     "dusk-windows-ddc-spike": ANY,

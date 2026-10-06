@@ -38,7 +38,7 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-QRK-3: `list --verbose` shows what was discovered and whether a profile was applied, so users can report and fix problems for their own monitor.
 
 ## 3. Monitors
-- SPEC-MON-1: Each monitor has a stable ID derived from model and serial number. If unavailable, fall back to model + connection position and flag as "unstable ID".
+- SPEC-MON-1: Each monitor has a stable ID derived from model and serial number: `<model>#<serial>` from the EDID (model name descriptor, else Windows' description; serial text descriptor, else the numeric serial), e.g. `L32p-30#U5ABC123`. If the serial is unavailable, or two connected monitors report the same one, fall back to `<model>#<connection position>` and flag as "unstable ID". When IDs change format, the daemon moves saved preset entries and hotkeys from a monitor's old ID to its new one at startup (only for monitors connected then, and never away from an ID that still names a connected monitor).
 - SPEC-MON-2: Monitors are addressable by ID, by a user-assigned alias, or by index in the CLI.
 - SPEC-MON-3: The app MUST detect monitor connect/disconnect and wake from sleep, and refresh its monitor list within 3 seconds.
 - SPEC-MON-4: A command to a monitor that does not answer MUST time out (default 2 s, with up to 3 attempts) and report "not responding". It MUST NOT block other monitors, the UI, or hotkeys. A display that Windows cannot open for DDC/CI is left out of the DDC/CI monitor list instead of making the listing fail. A display shown only on a built-in panel is never listed through DDC/CI, even when Windows can open it; it is listed through section 3.1 instead. A display duplicated onto an external monitor stays listed, for that monitor.
@@ -144,15 +144,15 @@ Exit codes: `0` success; `1` general error; `2` invalid usage or value; `3` moni
 - SPEC-INT-4 (optional): link `dusk://preset/<name>` applies a preset.
 
 ## 12. Settings and data
-- SPEC-DAT-1: All settings, presets, rules and hotkeys live in one human-editable file in the user's profile; a file beside the executable enables portable mode. Hotkeys are stored as `[[hotkeys]]` entries with `keys` (e.g. `"Ctrl+Alt+Up"`), `action` (e.g. `"brightness+"`, `"preset:Night"`, `"input:0x11"`) and an optional `monitor`; step sizes and the indicator setting are top-level keys (`brightness_step`, `contrast_step`, `volume_step`, `show_osd`).
+- SPEC-DAT-1: All settings, presets, rules and hotkeys live in one human-editable file in the user's profile; a file beside the executable enables portable mode. Hotkeys are stored as `[[hotkeys]]` entries with `keys` (e.g. `"Ctrl+Alt+Up"`), `action` (e.g. `"brightness+"`, `"preset:Night"`, `"input:0x11"`) and an optional `monitor`; step sizes, the indicator setting and the log setting are top-level keys (`brightness_step`, `contrast_step`, `volume_step`, `show_osd`, `diagnostic_log`).
 - SPEC-DAT-2: Invalid or unknown fields in the file are reported with line information and never cause data loss; the app starts with defaults for the broken section and keeps a `.bak` copy.
 - SPEC-DAT-3: The file is written only when settings change, and atomically.
 - SPEC-DAT-4: The file carries a version number; future versions migrate older files.
 
 ## 13. Non-functional requirements
 - SPEC-NFR-1: Idle CPU 0% (no activity between user/event triggers); idle working set under 30 MB; download under 10 MB; startup to tray under 300 ms.
-- SPEC-NFR-2: No network access, telemetry or administrator rights. Single instance; launching a second one forwards the request and exits.
-- SPEC-NFR-3: Logging is off by default; when on, logs rotate (max 5 files of 1 MB) and contain no personal data beyond monitor model and serial.
+- SPEC-NFR-2: No network access, telemetry or administrator rights. Single instance per user session: launching a second one asks the running one to show Settings (nothing with `--background`, e.g. at sign-in) and exits without touching the settings file. The daemon has no console window; if it cannot start, it says why in a message box.
+- SPEC-NFR-3: The log file is off by default and is turned on with Settings > General > Diagnostic log (setting `diagnostic_log`) or `duskd --log`; the setting takes effect without a restart. When on, the log is written to `%LOCALAPPDATA%\Dusk\logs`, rotates (max 5 files of 1 MB) and contains no personal data beyond monitor model and serial (the user's profile path is written as `%USERPROFILE%`). Warnings and errors are also written to stderr; since `duskd` has no console (SPEC-NFR-2), they are seen there only when stderr is redirected (e.g. `duskd 2> errors.txt`), so the log file is the way to see them.
 - SPEC-NFR-4: The app MUST recover from monitor, driver and sleep/wake errors without restart.
 
 ## 14. Platform scope

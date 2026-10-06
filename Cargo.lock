@@ -24,6 +24,7 @@ version = "0.1.0"
 dependencies = [
  "dusk-ddc-fake",
  "dusk-domain",
+ "log",
 ]
 
 [[package]]
@@ -42,11 +43,13 @@ dependencies = [
  "dusk-cli",
  "dusk-ddc-fake",
  "dusk-ddc-windows",
+ "dusk-domain",
  "dusk-ipc",
  "dusk-panel-windows",
  "dusk-store-file",
  "dusk-ui-win32",
  "embed-resource",
+ "log",
  "serde_json",
  "windows",
 ]
@@ -78,6 +81,7 @@ dependencies = [
  "dusk-ddc-fake",
  "dusk-domain",
  "dusk-mccs",
+ "log",
  "windows",
 ]
 
@@ -92,6 +96,7 @@ dependencies = [
  "dusk-app",
  "dusk-ddc-fake",
  "dusk-domain",
+ "log",
  "serde",
  "serde_json",
  "windows",
@@ -138,6 +143,7 @@ dependencies = [
  "dusk-app",
  "dusk-domain",
  "dusk-ui-model",
+ "log",
  "windows",
 ]
 
@@ -201,6 +207,12 @@ name = "libc"
 version = "0.2.190"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
+
+[[package]]
+name = "log"
+version = "0.4.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "memchr"

@@ -151,6 +151,8 @@ pub struct SettingsDto {
     pub volume_step: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_osd: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic_log: Option<bool>,
 }
 
 impl SettingsDto {
@@ -165,6 +167,7 @@ impl SettingsDto {
             contrast_step: self.contrast_step.unwrap_or(current.contrast_step),
             volume_step: self.volume_step.unwrap_or(current.volume_step),
             show_osd: self.show_osd.unwrap_or(current.show_osd),
+            diagnostic_log: self.diagnostic_log.unwrap_or(current.diagnostic_log),
         }
     }
 }
@@ -180,6 +183,7 @@ impl From<AppSettings> for SettingsDto {
             contrast_step: Some(value.contrast_step),
             volume_step: Some(value.volume_step),
             show_osd: Some(value.show_osd),
+            diagnostic_log: Some(value.diagnostic_log),
         }
     }
 }
@@ -497,6 +501,8 @@ impl DispatchError {
 #[derive(Debug)]
 pub enum IpcError {
     DaemonUnavailable,
+    /// Another process already serves the daemon's pipe.
+    PipeInUse,
     Io(std::io::Error),
     Protocol(String),
 }
@@ -505,6 +511,7 @@ impl fmt::Display for IpcError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DaemonUnavailable => f.write_str("duskd is not running"),
+            Self::PipeInUse => f.write_str("another program is already serving the Dusk pipe"),
             Self::Io(error) => write!(f, "IPC I/O failed: {error}"),
             Self::Protocol(error) => write!(f, "IPC protocol error: {error}"),
         }
@@ -514,7 +521,7 @@ impl fmt::Display for IpcError {
 impl std::error::Error for IpcError {}
 
 #[cfg(windows)]
-pub use windows_pipe::{PIPE_ENV, serve_forever, transact};
+pub use windows_pipe::{PIPE_ENV, PipeServer, pipe_name, transact};
 
 #[cfg(test)]
 mod tests {
@@ -689,6 +696,7 @@ mod tests {
         let mut settings = h.settings.stored();
         settings.brightness_step = 10;
         settings.show_osd = false;
+        settings.diagnostic_log = true;
         h.settings.replace(settings);
         let saved = call(
             &h.service,
@@ -699,6 +707,7 @@ mod tests {
         assert_eq!(stored.debounce_ms, 800);
         assert_eq!(stored.brightness_step, 10);
         assert!(!stored.show_osd);
+        assert!(stored.diagnostic_log);
         let read = call(&h.service, r#"{"op":"settings_get"}"#);
         assert_eq!(read["result"]["brightness_step"], 10);
     }
@@ -796,7 +805,7 @@ mod windows_tests {
     //! Real named-pipe round trips on pipes private to each test; no monitor
     //! is touched and the daemon's own pipe is never used.
 
-    use super::windows_pipe::{serve_forever_on, transact_on};
+    use super::windows_pipe::{PipeServer, transact_on};
     use super::{IpcError, MAX_MESSAGE_SIZE, dispatch};
     use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
     use dusk_domain::ControlKey;
@@ -816,9 +825,9 @@ mod windows_tests {
     /// Serves `handler` on a fresh pipe and waits until it accepts clients.
     fn start_server(handler: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static) -> String {
         let name = unique_pipe_name();
-        let server_name = name.clone();
+        let server = PipeServer::bind_on(&name).expect("a private pipe binds");
         thread::spawn(move || {
-            let _ = serve_forever_on(&server_name, handler);
+            let _ = server.serve_forever(handler);
         });
         let deadline = Instant::now() + Duration::from_secs(5);
         while transact_on(&name, b"").is_err() {
@@ -826,6 +835,17 @@ mod windows_tests {
             thread::sleep(Duration::from_millis(10));
         }
         name
+    }
+
+    #[test]
+    fn a_pipe_name_that_is_already_served_cannot_be_bound_again() {
+        let name = start_server(|request| request.to_vec());
+        assert!(matches!(
+            PipeServer::bind_on(&name),
+            Err(IpcError::PipeInUse)
+        ));
+        // The first server keeps answering.
+        assert_eq!(transact_on(&name, b"still here").unwrap(), b"still here");
     }
 
     #[test]

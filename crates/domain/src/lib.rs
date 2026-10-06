@@ -318,6 +318,8 @@ pub struct AppSettings {
     pub volume_step: u32,
     /// Show the on-screen indicator after a hotkey (SPEC-HK-6).
     pub show_osd: bool,
+    /// Write a diagnostic log file (SPEC-NFR-3; off by default).
+    pub diagnostic_log: bool,
 }
 
 /// Allowed hotkey step sizes, in percent.
@@ -368,6 +370,7 @@ impl Default for AppSettings {
             contrast_step: 5,
             volume_step: 5,
             show_osd: true,
+            diagnostic_log: false,
         }
     }
 }

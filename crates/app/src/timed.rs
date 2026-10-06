@@ -94,7 +94,7 @@ impl TimedBackend {
                 }
             });
             if let Err(error) = spawned {
-                eprintln!("error: could not start a monitor worker: {error}");
+                log::error!("could not start a monitor worker: {error}");
             }
             sender
         });

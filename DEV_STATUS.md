@@ -33,6 +33,33 @@ Both Settings presentations use the same view model and application API. The def
 - Light theme, other display scales and a formal keyboard/accessibility review were not exhaustively covered by the v0 acceptance.
 - The CI workflow has not run yet: the repository has no GitHub remote. Window procedures and DDC/CI calls remain untested by design (humble objects); `ddc-fake` does not simulate latency or hangs yet.
 
+## Architecture and code review TODO (2026-10-06)
+
+Findings of a full design and code review, most important first. Tick an item when it is fixed and verified.
+
+### P1: before the first release
+
+- [x] **R1. Monitor IDs do not follow SPEC-MON-1.** IDs are `"{Windows description}#{position}"`, never EDID model + serial, and every monitor is flagged unstable. Impact: after a monitor is added, reordered, or re-enumerated on wake, presets and hotkeys can act on the wrong monitor (including switching its input); monitors that Windows calls "Generic PnP Monitor" cannot be told apart; the capability cache (keyed by ID, never cleared) can describe the wrong monitor after a hotplug. Fix: IDs from EDID (manufacturer, product code, serial), position only as a fallback; clear the cache when the display set changes.
+- [x] **R2. `duskd` is a console program and can run twice.** No `windows_subsystem`, no single-instance check, and the pipe lacks `FILE_FLAG_FIRST_PIPE_INSTANCE` and `PIPE_REJECT_REMOTE_CLIENTS`. Impact: starting at sign-in opens a console window (closing it kills Dusk); a second copy adds a second tray icon, fails to register hotkeys, and serves the same pipe, so requests go to either copy and each has its own rate limiter, defeating the write protection; another program could create the pipe first. Blocks "Start with Windows".
+- [x] **R3. No logging (SPEC-NFR-3).** Warnings use `eprintln!`, including in `app`; once `duskd` has no console they are lost. ARCH says a `log` facade is in place; it is not. Impact: failures on a user's machine cannot be diagnosed.
+
+### P2: correctness and robustness
+
+- [ ] **R4. Monitor I/O on the UI thread.** Slider/hotkey commits (`flush_pending_adjustments`, driven by a Win32 timer), Apply, refresh and `matching_preset` (which reads every entry of every preset) run on the UI thread, each call bounded only by the 6 s timeout. Impact: long freezes with a hung monitor. Also, when buffered writes are committed is decided by the UI's timer instead of `app`.
+- [ ] **R5. Lost updates and fragile settings.** Load-modify-save of presets, hotkeys and settings happens in separate locked steps while the UI and IPC threads run concurrently; the settings file is re-read and parsed on every `set` and `adjust`. Impact: concurrent edits can overwrite each other; one typo in the hand-edited file stops every control. Fix: in-memory state, a transactional `update` port, reload on change keeping the last good version.
+- [ ] **R6. Undefined behavior in the window procedure.** Each message creates a new `&mut WindowContext`; modal calls (`MessageBoxW`, `TrackPopupMenu`, `SendMessageW`) re-enter, so two live `&mut` exist. About 200 `unsafe` sites with 2 `SAFETY` comments; `modern.rs` is 2,657 lines. Impact: latent crashes in optimized builds; hard to maintain. Fix: `RefCell`-guarded context or deferred work, documented safety, split `modern.rs` by page.
+- [ ] **R7. Strict, thinly tested capability parser.** An unbalanced capabilities string fails the parse and makes the monitor unusable; 3 tests, all from the L32p-30. Impact: many real monitors would not work. Fix: lenient parsing and a corpus of real capability strings.
+- [ ] **R8. Timeout retries overlap on one monitor.** After a timeout `TimedBackend` starts a new worker while the stuck call may still run, so two DDC/CI calls can hit the same monitor (ARCH section 7 says this is unsafe); writes are retried although the first may still complete; abandoned threads and the worker map are never cleaned up. Fix: keep the monitor busy until the stuck call returns; do not retry writes.
+
+### P3: maintainability and polish
+
+- [ ] **R9. Error types.** Mostly `BackendError::Failed(String)`; "no presets are defined" and "monitor has no supported controls" use `SettingsInvalid` (CLI exit code 2, "invalid usage"); a missing preset entry is `PresetNotFound`.
+- [ ] **R10. `MonitorService` does too much.** Four APIs in about 900 lines plus about 130 lines of delegation; v2 schedules would grow it. Fix: control, preset and hotkey services sharing one write gate.
+- [ ] **R11. Redundant work per call.** Each read or write re-enumerates all monitors, opens and closes their handles and queries the display configuration; each slider commit reads before writing (double DDC/CI traffic). Fix: cache the monitor list, refresh it when displays change.
+- [ ] **R12. C# client has no read timeout.** PowerToys Run or Command Palette hangs while the daemon waits on an input confirmation or a monitor timeout.
+- [ ] **R13. Doc drift and release basics.** ARCH describes background capability prefetch that does not exist (EDID IDs and logging now match ARCH); `spikes/windows-ddc` is still a workspace member; no workspace lints or release profile; every crate is 0.1.0; the pipe protocol has no version check.
+- [ ] **R14. Rate-limit deferral message as info.** "monitor write rate limit deferred <control> for <monitor>" is logged as a warning; the owner wants it kept in the log as an info message (the deferral is expected behavior, not a problem).
+
 ## Next implementation steps
 
 1. All v1 features are implemented: presets and global hotkeys (both accepted by the owner), built-in display brightness (SPEC section 3.1) and the PowerToys integrations (SPEC-INT-1/2; PowerToys Run and Command Palette accepted by the owner). Next: v1 acceptance items below, then v2 schedules.

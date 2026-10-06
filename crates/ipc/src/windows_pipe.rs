@@ -7,14 +7,16 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use windows::Win32::Foundation::{ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE};
+use windows::Win32::Foundation::{
+    ERROR_ACCESS_DENIED, ERROR_PIPE_CONNECTED, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
+};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_MODE,
-    OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
+    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_GENERIC_READ,
+    FILE_GENERIC_WRITE, FILE_SHARE_MODE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
 };
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, NAMED_PIPE_MODE, PIPE_READMODE_BYTE,
-    PIPE_TYPE_BYTE, PIPE_WAIT,
+    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
 };
 use windows::core::{HRESULT, PCWSTR};
 
@@ -25,7 +27,8 @@ const PIPE_NAME: &str = r"\\.\pipe\dusk-v0";
 /// second instance does not talk to the user's running daemon.
 pub const PIPE_ENV: &str = "DUSK_PIPE";
 
-fn pipe_name() -> String {
+/// The full pipe path, e.g. `\\.\pipe\dusk-v0`.
+pub fn pipe_name() -> String {
     match std::env::var(PIPE_ENV) {
         Ok(name) if !name.trim().is_empty() => format!(r"\\.\pipe\{}", name.trim()),
         _ => PIPE_NAME.to_owned(),
@@ -33,61 +36,121 @@ fn pipe_name() -> String {
 }
 const PIPE_INSTANCE_LIMIT: u32 = 16;
 
-pub fn serve_forever(
-    handler: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
-) -> Result<(), IpcError> {
-    serve_forever_on(&pipe_name(), handler)
+/// The daemon's end of the pipe. Binding claims the name before any client
+/// can connect: it fails if any other process (another `duskd`, or a program
+/// impersonating it) already serves that name, and remote clients are
+/// rejected.
+pub struct PipeServer {
+    name: Vec<u16>,
+    /// The first instance, created by `bind` and not yet connected.
+    first: Option<HANDLE>,
 }
 
-/// Serves `handler` on the named pipe `name` (tests use a private name).
-pub(crate) fn serve_forever_on(
-    name: &str,
-    handler: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
-) -> Result<(), IpcError> {
-    let handler = Arc::new(handler);
-    let encoded_name = wide_null(name);
-    loop {
-        let raw_pipe = unsafe {
-            CreateNamedPipeW(
-                PCWSTR(encoded_name.as_ptr()),
-                PIPE_ACCESS_DUPLEX,
-                NAMED_PIPE_MODE(PIPE_TYPE_BYTE.0 | PIPE_READMODE_BYTE.0 | PIPE_WAIT.0),
-                PIPE_INSTANCE_LIMIT,
-                MAX_MESSAGE_SIZE as u32 + 4,
-                MAX_MESSAGE_SIZE as u32 + 4,
-                0,
-                None,
-            )
-        };
-        if raw_pipe == INVALID_HANDLE_VALUE {
-            return Err(IpcError::Io(std::io::Error::last_os_error()));
-        }
-        let pipe_handle = raw_pipe.0 as isize;
-        let handle = unsafe { OwnedHandle::from_raw_handle(raw_pipe.0 as RawHandle) };
-        let mut pipe = File::from(handle);
-        let connect_result = unsafe { ConnectNamedPipe(HANDLE(pipe_handle as _), None) };
-        if let Err(error) = connect_result
-            && error.code() != HRESULT::from_win32(ERROR_PIPE_CONNECTED.0)
-        {
-            eprintln!("warning: ConnectNamedPipe failed: {error}");
-            drop(pipe);
-            continue;
-        }
-        let handler = handler.clone();
-        thread::Builder::new()
-            .name("dusk-ipc-client".into())
-            .spawn(move || {
-                let result = serve_connection(&mut pipe, handler.as_ref());
-                if let Err(error) = unsafe { DisconnectNamedPipe(HANDLE(pipe_handle as _)) } {
-                    eprintln!("warning: DisconnectNamedPipe failed: {error}");
-                }
-                drop(pipe);
-                if let Err(error) = result {
-                    eprintln!("warning: named-pipe request failed: {error}");
-                }
-            })
-            .map_err(|error| IpcError::Io(std::io::Error::other(error)))?;
+// SAFETY: the handle is owned by the server and used by one thread at a time.
+unsafe impl Send for PipeServer {}
+
+impl PipeServer {
+    pub fn bind() -> Result<Self, IpcError> {
+        Self::bind_on(&pipe_name())
     }
+
+    /// Binds the named pipe `name` (tests use a private name).
+    pub(crate) fn bind_on(name: &str) -> Result<Self, IpcError> {
+        let name = wide_null(name);
+        let first = create_instance(&name, true)?;
+        Ok(Self {
+            name,
+            first: Some(first),
+        })
+    }
+
+    /// Answers each request with `handler`, one thread per connection.
+    pub fn serve_forever(
+        mut self,
+        handler: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
+    ) -> Result<(), IpcError> {
+        let handler = Arc::new(handler);
+        loop {
+            let raw_pipe = match self.first.take() {
+                Some(first) => first,
+                None => create_instance(&self.name, false)?,
+            };
+            serve_instance(raw_pipe, &handler)?;
+        }
+    }
+}
+
+impl Drop for PipeServer {
+    fn drop(&mut self) {
+        if let Some(first) = self.first.take() {
+            drop(unsafe { OwnedHandle::from_raw_handle(first.0 as RawHandle) });
+        }
+    }
+}
+
+fn create_instance(name: &[u16], first: bool) -> Result<HANDLE, IpcError> {
+    let open_mode = if first {
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE
+    } else {
+        PIPE_ACCESS_DUPLEX
+    };
+    let raw_pipe = unsafe {
+        CreateNamedPipeW(
+            PCWSTR(name.as_ptr()),
+            open_mode,
+            NAMED_PIPE_MODE(
+                PIPE_TYPE_BYTE.0
+                    | PIPE_READMODE_BYTE.0
+                    | PIPE_WAIT.0
+                    | PIPE_REJECT_REMOTE_CLIENTS.0,
+            ),
+            PIPE_INSTANCE_LIMIT,
+            MAX_MESSAGE_SIZE as u32 + 4,
+            MAX_MESSAGE_SIZE as u32 + 4,
+            0,
+            None,
+        )
+    };
+    if raw_pipe == INVALID_HANDLE_VALUE {
+        if first && unsafe { GetLastError() } == ERROR_ACCESS_DENIED {
+            return Err(IpcError::PipeInUse);
+        }
+        return Err(IpcError::Io(std::io::Error::last_os_error()));
+    }
+    Ok(raw_pipe)
+}
+
+/// Waits for a client on `raw_pipe` and answers it on its own thread.
+fn serve_instance(
+    raw_pipe: HANDLE,
+    handler: &Arc<impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static>,
+) -> Result<(), IpcError> {
+    let pipe_handle = raw_pipe.0 as isize;
+    let handle = unsafe { OwnedHandle::from_raw_handle(raw_pipe.0 as RawHandle) };
+    let mut pipe = File::from(handle);
+    let connect_result = unsafe { ConnectNamedPipe(HANDLE(pipe_handle as _), None) };
+    if let Err(error) = connect_result
+        && error.code() != HRESULT::from_win32(ERROR_PIPE_CONNECTED.0)
+    {
+        log::warn!("ConnectNamedPipe failed: {error}");
+        drop(pipe);
+        return Ok(());
+    }
+    let handler = handler.clone();
+    thread::Builder::new()
+        .name("dusk-ipc-client".into())
+        .spawn(move || {
+            let result = serve_connection(&mut pipe, handler.as_ref());
+            if let Err(error) = unsafe { DisconnectNamedPipe(HANDLE(pipe_handle as _)) } {
+                log::warn!("DisconnectNamedPipe failed: {error}");
+            }
+            drop(pipe);
+            if let Err(error) = result {
+                log::warn!("named-pipe request failed: {error}");
+            }
+        })
+        .map_err(|error| IpcError::Io(std::io::Error::other(error)))?;
+    Ok(())
 }
 
 fn serve_connection(pipe: &mut File, handler: &impl Fn(&[u8]) -> Vec<u8>) -> Result<(), IpcError> {

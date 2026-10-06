@@ -49,10 +49,14 @@ const MENU_QUIT: usize = 201;
 
 mod hotkeys;
 mod icons;
+mod instance;
 mod keys;
 mod modern;
 mod prompts;
 
+pub use instance::{
+    Claim, InstanceGuard, claim_instance, request_show_settings, show_startup_error,
+};
 pub use prompts::DesktopInputPrompter;
 
 const WM_HOTKEY: u32 = 0x0312;
@@ -74,22 +78,18 @@ struct WindowContext {
     tray_icon: Option<NOTIFYICONDATAW>,
     hotkeys: hotkeys::Registrar,
     hotkey_runner: hotkeys::Runner,
-}
-
-pub fn run(api: Arc<dyn Api>) -> Result<(), String> {
-    run_with_native_ui(api, false)
-}
-
-pub fn run_with_native_ui(api: Arc<dyn Api>, native_ui: bool) -> Result<(), String> {
-    run_with_options(api, native_ui, false)
+    /// Sent by a second start of this instance (see `request_show_settings`).
+    show_settings_message: u32,
 }
 
 /// Runs the tray app. With `start_hidden`, the Settings window stays hidden
 /// until opened from the tray (e.g. when started with Windows).
+/// `instance_key` is the key passed to `claim_instance`.
 pub fn run_with_options(
     api: Arc<dyn Api>,
     native_ui: bool,
     start_hidden: bool,
+    instance_key: &str,
 ) -> Result<(), String> {
     let instance = unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None) }
         .map_err(|error| error.to_string())?;
@@ -130,6 +130,7 @@ pub fn run_with_options(
         tray_icon: None,
         hotkeys: hotkeys::Registrar::default(),
         hotkey_runner: hotkeys::Runner::default(),
+        show_settings_message: instance::show_settings_message(instance_key),
     });
     let context_ptr = (&mut *context) as *mut WindowContext;
     let window = unsafe {
@@ -218,13 +219,13 @@ unsafe extern "system" fn window_proc(
         let context = unsafe { &mut *context_pointer };
         context.window = window;
         if let Err(error) = create_controls(context) {
-            eprintln!("could not create Settings controls: {error}");
+            log::error!("could not create Settings controls: {error}");
             unsafe { PostQuitMessage(1) };
         } else {
             // Without a taskbar (e.g. Explorer not running) the app still
             // works; the window stays visible instead.
             if let Err(error) = add_tray_icon(context) {
-                eprintln!("warning: could not add tray icon: {error}");
+                log::warn!("could not add tray icon: {error}");
             }
             refresh(context);
             hotkeys::register(context);
@@ -233,6 +234,10 @@ unsafe extern "system" fn window_proc(
     }
     if !context_pointer.is_null() {
         let context = unsafe { &mut *context_pointer };
+        if message != 0 && message == context.show_settings_message {
+            show_settings(context);
+            return LRESULT(0);
+        }
         if message == TRAY_MESSAGE {
             match lparam.0 as u32 {
                 windows::Win32::UI::WindowsAndMessaging::WM_LBUTTONUP
@@ -1085,7 +1090,7 @@ fn set_status(context: &WindowContext, text: &str) {
 fn set_text(window: HWND, text: &str) {
     let text = wide_null(text);
     if let Err(error) = unsafe { SetWindowTextW(window, PCWSTR(text.as_ptr())) } {
-        eprintln!("could not update a Settings control: {error}");
+        log::error!("could not update a Settings control: {error}");
     }
 }
 

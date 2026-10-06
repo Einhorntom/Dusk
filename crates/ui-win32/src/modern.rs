@@ -1524,6 +1524,25 @@ fn build_general(builder: &mut Builder<'_>) {
         0,
     );
     builder.row("Settings", Some("Changes are saved automatically."), 0);
+    let toggle_width = builder.px(44);
+    let (top, height) = builder.row(
+        "Diagnostic log",
+        Some("Records warnings and errors in %LOCALAPPDATA%\\Dusk\\logs to help track down problems."),
+        toggle_width,
+    );
+    builder.create(
+        w!("BUTTON"),
+        "",
+        Control::LogToggle.id(),
+        WS_TABSTOP.0 | BS_OWNERDRAW as u32,
+        (
+            builder.control_x(toggle_width),
+            top + (height - builder.px(24)) / 2,
+            toggle_width,
+            builder.px(24),
+        ),
+        FontKind::Body,
+    );
     builder.card_end();
     builder.section("About");
     builder.card_begin();
@@ -1843,12 +1862,15 @@ pub(crate) fn draw_item(context: &WindowContext, item: &DRAWITEMSTRUCT) {
             theme.text,
             DT_LEFT,
         );
-    } else if let Some(toggle @ (Control::ConfirmToggle | Control::OsdToggle)) = control {
+    } else if let Some(
+        toggle @ (Control::ConfirmToggle | Control::OsdToggle | Control::LogToggle),
+    ) = control
+    {
         let settings = current_settings(context);
-        let on = if toggle == Control::OsdToggle {
-            settings.show_osd
-        } else {
-            settings.confirm_input_change
+        let on = match toggle {
+            Control::OsdToggle => settings.show_osd,
+            Control::LogToggle => settings.diagnostic_log,
+            _ => settings.confirm_input_change,
         };
         unsafe {
             FillRect(
@@ -1999,12 +2021,12 @@ pub(crate) fn handle_command(context: &mut WindowContext, wparam: WPARAM) {
         Control::Combo(_) if notification == CBN_SELCHANGE => apply_enum(context, id),
         Control::HotkeyRemove(index) if clicked => remove_hotkey(context, index),
         Control::HotkeyAdd if clicked => add_hotkey(context),
-        Control::ConfirmToggle | Control::OsdToggle => {
+        Control::ConfirmToggle | Control::OsdToggle | Control::LogToggle => {
             let mut settings = current_settings(context);
-            if control == Control::OsdToggle {
-                settings.show_osd = !settings.show_osd;
-            } else {
-                settings.confirm_input_change = !settings.confirm_input_change;
+            match control {
+                Control::OsdToggle => settings.show_osd = !settings.show_osd,
+                Control::LogToggle => settings.diagnostic_log = !settings.diagnostic_log,
+                _ => settings.confirm_input_change = !settings.confirm_input_change,
             }
             queue_settings_save(context, settings);
             if let Some(window) = context.modern.children.iter().find(|window| {

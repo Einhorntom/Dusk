@@ -52,9 +52,9 @@ Settings, presets and hotkeys are stored in `%APPDATA%\Dusk\config.toml`.
 The CLI works only while `duskd` is running, so every change goes through the same buffering, rate limits and input confirmation.
 
 ```powershell
-dusk list                                   # monitors and their IDs
-dusk get L32p-30#0 brightness
-dusk set L32p-30#0 brightness 40            # 0-100
+dusk list                                   # monitors and their IDs (model#serial)
+dusk get L32p-30#U5ABC123 brightness
+dusk set L32p-30#U5ABC123 brightness 40      # 0-100
 dusk set Built-in-display brightness 30
 dusk preset apply "Night mode"
 dusk preset next                            # cycle through presets

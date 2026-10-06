@@ -12,7 +12,9 @@ path = "src/main.rs"
 embed-resource = "3"
 
 [dependencies]
+log = "0.4"
 dusk-app = { path = "../app" }
+dusk-domain = { path = "../domain" }
 dusk-ddc-fake = { path = "../ddc-fake" }
 dusk-ddc-windows = { path = "../ddc-windows" }
 dusk-panel-windows = { path = "../panel-windows" }

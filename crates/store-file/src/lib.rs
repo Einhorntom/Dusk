@@ -73,6 +73,8 @@ struct SettingsFile {
     volume_step: u32,
     #[serde(default = "default_true")]
     show_osd: bool,
+    #[serde(default)]
+    diagnostic_log: bool,
 }
 
 fn default_step() -> u32 {
@@ -95,6 +97,7 @@ impl From<AppSettings> for SettingsFile {
             contrast_step: value.contrast_step,
             volume_step: value.volume_step,
             show_osd: value.show_osd,
+            diagnostic_log: value.diagnostic_log,
         }
     }
 }
@@ -118,6 +121,7 @@ impl TryFrom<SettingsFile> for AppSettings {
             contrast_step: value.contrast_step,
             volume_step: value.volume_step,
             show_osd: value.show_osd,
+            diagnostic_log: value.diagnostic_log,
         };
         validate(&settings)?;
         Ok(settings)
@@ -580,6 +584,7 @@ mod tests {
         let settings = AppSettings {
             volume_step: 2,
             show_osd: false,
+            diagnostic_log: true,
             ..AppSettings::default()
         };
         repository.save(&settings).unwrap();
@@ -602,6 +607,7 @@ mod tests {
         let settings = AppSettings::try_from(file.settings).unwrap();
         assert_eq!(settings.brightness_step, 5);
         assert!(settings.show_osd);
+        assert!(!settings.diagnostic_log);
         assert!(file.hotkeys.is_empty());
 
         for (keys, action) in [("Up", "brightness+"), ("Ctrl+Up", "sharpness+")] {

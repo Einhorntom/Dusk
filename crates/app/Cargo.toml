@@ -5,6 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
+log = "0.4"
 dusk-domain = { path = "../domain" }
 
 [dev-dependencies]

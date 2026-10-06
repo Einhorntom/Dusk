@@ -172,7 +172,7 @@ fn start_worker(window: HWND, api: Arc<dyn Api>) -> Sender<(KeyCombo, String)> {
             }
         });
     if let Err(error) = spawned {
-        eprintln!("error: could not start the hotkey worker: {error}");
+        log::error!("could not start the hotkey worker: {error}");
     }
     sender
 }
