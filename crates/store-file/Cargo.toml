@@ -5,6 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
+log = "0.4"
 dusk-app = { path = "../app" }
 dusk-domain = { path = "../domain" }
 serde = { version = "1", features = ["derive"] }

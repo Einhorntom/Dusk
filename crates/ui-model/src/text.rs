@@ -36,6 +36,14 @@ pub fn control_description(key: ControlKey) -> Option<&'static str> {
 }
 
 /// Human name for an enumerated control value; unknown values show as raw hex.
+/// Shown on a gain row while a factory colour preset is active.
+pub fn gains_unused_note(color_preset: u32) -> String {
+    format!(
+        "Not used in {}; gains apply to the User colour presets.",
+        enum_label(ControlKey::ColorPreset, color_preset)
+    )
+}
+
 pub fn enum_label(key: ControlKey, value: u32) -> String {
     match (key.value_name(value), key) {
         (Some(name), ControlKey::Input) => format!("{name} (raw-0x{value:02X})"),

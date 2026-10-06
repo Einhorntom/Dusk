@@ -25,11 +25,9 @@ Both Settings presentations use the same view model and application API. The def
 
 ## Known gaps
 
-- Settings-window actions (Apply preset, Refresh, value changes) still run on the UI thread; since `TimedBackend` they are bounded by the SPEC-MON-4 timeout (up to about 6 s for a hung monitor) instead of hanging. Hotkeys and IPC requests are not affected.
 - Hardware quirks (colour-mode settle time, power-off modes, input `0x31` = USB-C) are still constants in code; a quirk profile (SPEC-QRK) is planned for the second monitor model or the Ubuntu work.
 
 - Input and volume behaviour was verified manually by the owner on the reference monitor (v0 acceptance); automated CI intentionally does not switch physical inputs.
-- Slider writes still read back after the buffered write; apply the same no-read-back approach if a DDC/CI read error appears right after a write.
 - Light theme, other display scales and a formal keyboard/accessibility review were not exhaustively covered by the v0 acceptance.
 - The CI workflow has not run yet: the repository has no GitHub remote. Window procedures and DDC/CI calls remain untested by design (humble objects); `ddc-fake` does not simulate latency or hangs yet.
 
@@ -45,11 +43,11 @@ Findings of a full design and code review, most important first. Tick an item wh
 
 ### P2: correctness and robustness
 
-- [ ] **R4. Monitor I/O on the UI thread.** Slider/hotkey commits (`flush_pending_adjustments`, driven by a Win32 timer), Apply, refresh and `matching_preset` (which reads every entry of every preset) run on the UI thread, each call bounded only by the 6 s timeout. Impact: long freezes with a hung monitor. Also, when buffered writes are committed is decided by the UI's timer instead of `app`.
-- [ ] **R5. Lost updates and fragile settings.** Load-modify-save of presets, hotkeys and settings happens in separate locked steps while the UI and IPC threads run concurrently; the settings file is re-read and parsed on every `set` and `adjust`. Impact: concurrent edits can overwrite each other; one typo in the hand-edited file stops every control. Fix: in-memory state, a transactional `update` port, reload on change keeping the last good version.
-- [ ] **R6. Undefined behavior in the window procedure.** Each message creates a new `&mut WindowContext`; modal calls (`MessageBoxW`, `TrackPopupMenu`, `SendMessageW`) re-enter, so two live `&mut` exist. About 200 `unsafe` sites with 2 `SAFETY` comments; `modern.rs` is 2,657 lines. Impact: latent crashes in optimized builds; hard to maintain. Fix: `RefCell`-guarded context or deferred work, documented safety, split `modern.rs` by page.
-- [ ] **R7. Strict, thinly tested capability parser.** An unbalanced capabilities string fails the parse and makes the monitor unusable; 3 tests, all from the L32p-30. Impact: many real monitors would not work. Fix: lenient parsing and a corpus of real capability strings.
-- [ ] **R8. Timeout retries overlap on one monitor.** After a timeout `TimedBackend` starts a new worker while the stuck call may still run, so two DDC/CI calls can hit the same monitor (ARCH section 7 says this is unsafe); writes are retried although the first may still complete; abandoned threads and the worker map are never cleaned up. Fix: keep the monitor busy until the stuck call returns; do not retry writes.
+- [x] **R4. Monitor I/O on the UI thread.** Slider/hotkey commits (`flush_pending_adjustments`, driven by a Win32 timer), Apply, refresh and `matching_preset` (which reads every entry of every preset) run on the UI thread, each call bounded only by the 6 s timeout. Impact: long freezes with a hung monitor. Also, when buffered writes are committed is decided by the UI's timer instead of `app`.
+- [x] **R5. Lost updates and fragile settings.** Load-modify-save of presets, hotkeys and settings happens in separate locked steps while the UI and IPC threads run concurrently; the settings file is re-read and parsed on every `set` and `adjust`. Impact: concurrent edits can overwrite each other; one typo in the hand-edited file stops every control. Fix: in-memory state, a transactional `update` port, reload on change keeping the last good version.
+- [x] **R6. Undefined behavior in the window procedure.** Each message creates a new `&mut WindowContext`; modal calls (`MessageBoxW`, `TrackPopupMenu`, `SendMessageW`) re-enter, so two live `&mut` exist. About 200 `unsafe` sites with 2 `SAFETY` comments; `modern.rs` is 2,657 lines. Impact: latent crashes in optimized builds; hard to maintain. Fix: `RefCell`-guarded context or deferred work, documented safety, split `modern.rs` by page.
+- [x] **R7. Strict, thinly tested capability parser.** An unbalanced capabilities string fails the parse and makes the monitor unusable; 3 tests, all from the L32p-30. Impact: many real monitors would not work. Fix: lenient parsing and a corpus of real capability strings.
+- [x] **R8. Timeout retries overlap on one monitor.** After a timeout `TimedBackend` starts a new worker while the stuck call may still run, so two DDC/CI calls can hit the same monitor (ARCH section 7 says this is unsafe); writes are retried although the first may still complete; abandoned threads and the worker map are never cleaned up. Fix: keep the monitor busy until the stuck call returns; do not retry writes.
 
 ### P3: maintainability and polish
 

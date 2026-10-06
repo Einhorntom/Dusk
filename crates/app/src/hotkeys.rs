@@ -46,6 +46,7 @@ impl MonitorService {
 
     /// Adds a binding, or replaces the one with the same key combination.
     pub fn save_hotkey(&self, binding: HotkeyBinding) -> Result<(), UseCaseError> {
+        let _edit = self.editing();
         binding.keys.validate()?;
         if let HotkeyAction::ApplyPreset(name) = &binding.action
             && !self
@@ -66,6 +67,7 @@ impl MonitorService {
     }
 
     pub fn remove_hotkey(&self, keys: &KeyCombo) -> Result<(), UseCaseError> {
+        let _edit = self.editing();
         let mut hotkeys = self.hotkeys.load_hotkeys()?;
         let before = hotkeys.len();
         hotkeys.retain(|item| item.keys != *keys);

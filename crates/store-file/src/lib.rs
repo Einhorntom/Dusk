@@ -10,19 +10,44 @@ use dusk_domain::{
     validate_preset_name,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
+use std::time::SystemTime;
 
+/// The settings file. It is parsed only when it changes on disk (checked
+/// by modification time and size), so reads are cheap. If a hand edit
+/// leaves it invalid, the last valid contents stay in use (and default
+/// settings if it was never valid), a warning is logged once, and saving
+/// is refused so the user's edit is not overwritten.
 #[derive(Debug)]
 pub struct FileSettingsRepository {
     path: PathBuf,
-    write_lock: Mutex<()>,
+    state: Mutex<State>,
+}
+
+/// The file's identity on disk; `None` while it does not exist.
+type Stamp = Option<(SystemTime, u64)>;
+
+#[derive(Debug, Default)]
+struct State {
+    /// The last valid contents and the stamp they were read at.
+    good: Option<(Stamp, Loaded)>,
+    /// The stamp of an invalid file already reported.
+    reported_bad: Option<Stamp>,
+}
+
+/// Every section, converted and validated.
+#[derive(Clone, Debug, Default)]
+struct Loaded {
+    settings: AppSettings,
+    presets: Vec<Preset>,
+    hotkeys: Vec<HotkeyBinding>,
 }
 
 impl FileSettingsRepository {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self {
             path: path.into(),
-            write_lock: Mutex::new(()),
+            state: Mutex::new(State::default()),
         }
     }
 
@@ -284,29 +309,106 @@ impl FileSettingsRepository {
         atomic_write(&self.path, content.as_bytes()).map_err(io_error)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, ()> {
-        self.write_lock
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    fn stamp(&self) -> Result<Stamp, BackendError> {
+        match fs::metadata(&self.path) {
+            Ok(metadata) => Ok(Some((
+                metadata.modified().map_err(io_error)?,
+                metadata.len(),
+            ))),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(io_error(error)),
+        }
+    }
+
+    fn read_loaded(&self) -> Result<Loaded, BackendError> {
+        let Some(file) = self.read_file()? else {
+            return Ok(Loaded::default());
+        };
+        let invalid = |error: BackendError| {
+            BackendError::Failed(format!("invalid {}: {error}", self.path.display()))
+        };
+        Ok(Loaded {
+            settings: AppSettings::try_from(file.settings).map_err(invalid)?,
+            presets: file
+                .presets
+                .into_iter()
+                .map(Preset::try_from)
+                .collect::<Result<_, _>>()
+                .map_err(invalid)?,
+            hotkeys: file
+                .hotkeys
+                .into_iter()
+                .map(HotkeyBinding::try_from)
+                .collect::<Result<_, _>>()
+                .map_err(invalid)?,
+        })
+    }
+
+    /// The current contents: cached while the file is unchanged, the last
+    /// valid ones while it is invalid, or the error if it never was valid.
+    fn loaded(&self) -> Result<Loaded, BackendError> {
+        let mut state = self.lock();
+        let stamp = self.stamp()?;
+        if let Some((good_stamp, loaded)) = &state.good
+            && *good_stamp == stamp
+        {
+            return Ok(loaded.clone());
+        }
+        let already_reported = state.reported_bad == Some(stamp);
+        if already_reported && let Some((_, loaded)) = &state.good {
+            return Ok(loaded.clone());
+        }
+        match self.read_loaded() {
+            Ok(loaded) => {
+                state.good = Some((stamp, loaded.clone()));
+                state.reported_bad = None;
+                Ok(loaded)
+            }
+            Err(error) => {
+                if !already_reported {
+                    log::warn!("{error}; using the last valid settings until it is fixed");
+                    state.reported_bad = Some(stamp);
+                }
+                match &state.good {
+                    Some((_, loaded)) => Ok(loaded.clone()),
+                    None => Err(error),
+                }
+            }
+        }
+    }
+
     /// Reads the file (or defaults), applies `change` and writes it back, so
-    /// saving one section keeps the others. An unreadable file is not
-    /// overwritten.
+    /// saving one section keeps the others. An invalid file is not
+    /// overwritten, so a hand edit in progress is never lost.
     fn update(&self, change: impl FnOnce(&mut ConfigFile)) -> Result<(), BackendError> {
-        let _guard = self.lock();
-        let mut file = self.read_file()?.unwrap_or_default();
+        let _state = self.lock();
+        let mut file = self
+            .read_file()
+            .map_err(|error| {
+                BackendError::Failed(format!(
+                    "{error}; fix the file first (it was not overwritten)"
+                ))
+            })?
+            .unwrap_or_default();
         change(&mut file);
         self.write_file(&file)
     }
 }
 
 impl SettingsRepository for FileSettingsRepository {
+    /// Never fails because of the file's contents: with an invalid file
+    /// that was never valid, the defaults keep monitor control working.
     fn load(&self) -> Result<AppSettings, BackendError> {
-        let _guard = self.lock();
-        match self.read_file()? {
-            Some(file) => AppSettings::try_from(file.settings),
-            None => Ok(AppSettings::default()),
+        match self.loaded() {
+            Ok(loaded) => Ok(loaded.settings),
+            Err(BackendError::Failed(_)) if self.path.exists() => Ok(AppSettings::default()),
+            Err(error) => Err(error),
         }
     }
 
@@ -318,11 +420,7 @@ impl SettingsRepository for FileSettingsRepository {
 
 impl PresetRepository for FileSettingsRepository {
     fn load_presets(&self) -> Result<Vec<Preset>, BackendError> {
-        let _guard = self.lock();
-        match self.read_file()? {
-            Some(file) => file.presets.into_iter().map(Preset::try_from).collect(),
-            None => Ok(Vec::new()),
-        }
+        Ok(self.loaded()?.presets)
     }
 
     fn save_presets(&self, presets: &[Preset]) -> Result<(), BackendError> {
@@ -358,15 +456,7 @@ impl PresetRepository for FileSettingsRepository {
 
 impl HotkeyRepository for FileSettingsRepository {
     fn load_hotkeys(&self) -> Result<Vec<HotkeyBinding>, BackendError> {
-        let _guard = self.lock();
-        match self.read_file()? {
-            Some(file) => file
-                .hotkeys
-                .into_iter()
-                .map(HotkeyBinding::try_from)
-                .collect(),
-            None => Ok(Vec::new()),
-        }
+        Ok(self.loaded()?.hotkeys)
     }
 
     fn save_hotkeys(&self, hotkeys: &[HotkeyBinding]) -> Result<(), BackendError> {
@@ -621,6 +711,68 @@ mod tests {
         let steps = format!("{old}volume_step = 40\n");
         let file: ConfigFile = toml::from_str(&steps).unwrap();
         assert!(AppSettings::try_from(file.settings).is_err());
+    }
+
+    #[test]
+    fn a_broken_hand_edit_keeps_the_last_valid_settings_and_is_not_overwritten() {
+        let directory = std::env::temp_dir().join(format!(
+            "dusk-broken-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = directory.join("config.toml");
+        let repository = FileSettingsRepository::new(&path);
+        let settings = AppSettings {
+            debounce_ms: 700,
+            ..AppSettings::default()
+        };
+        repository.save(&settings).unwrap();
+        repository.save_hotkeys(&[]).unwrap();
+        assert_eq!(repository.load().unwrap(), settings);
+
+        let broken = fs::read_to_string(&path)
+            .unwrap()
+            .replace("debounce_ms = 700", "debounce_ms = ");
+        fs::write(&path, &broken).unwrap();
+        assert_eq!(repository.load().unwrap(), settings, "last valid settings");
+        assert!(repository.load_presets().unwrap().is_empty());
+        let refused = repository.save(&AppSettings::default()).unwrap_err();
+        assert!(refused.to_string().contains("not overwritten"), "{refused}");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            broken,
+            "the edit is kept"
+        );
+
+        // Fixed by hand: the new contents are used.
+        fs::write(&path, broken.replace("debounce_ms = ", "debounce_ms = 900")).unwrap();
+        assert_eq!(repository.load().unwrap().debounce_ms, 900);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_file_broken_from_the_start_gives_default_settings_but_no_presets() {
+        let directory = std::env::temp_dir().join(format!(
+            "dusk-never-valid-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("config.toml");
+        fs::write(&path, "version = \n").unwrap();
+        let repository = FileSettingsRepository::new(&path);
+        assert_eq!(repository.load().unwrap(), AppSettings::default());
+        assert!(
+            repository.load_presets().is_err(),
+            "presets are not silently empty"
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

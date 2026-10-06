@@ -499,3 +499,30 @@ fn an_unreadable_import_changes_nothing() {
     assert_eq!(h.presets.stored(), original);
     assert_eq!(h.service.presets_location(), "memory://presets");
 }
+
+#[test]
+fn concurrent_edits_never_lose_each_other() {
+    // Regression: each edit loaded the presets, changed them and saved them
+    // without a lock, so two clients saving at once could drop one preset.
+    let h = Harness::new(FakeBackend::single(FakeMonitor::reference("m")));
+    let service = h.service.clone();
+    let writers: Vec<_> = (0..8)
+        .map(|writer| {
+            let service = service.clone();
+            std::thread::spawn(move || {
+                for index in 0..10 {
+                    service
+                        .save_preset(Preset {
+                            name: format!("P{writer}-{index}"),
+                            entries: Vec::new(),
+                        })
+                        .unwrap();
+                }
+            })
+        })
+        .collect();
+    for writer in writers {
+        writer.join().unwrap();
+    }
+    assert_eq!(h.presets.stored().len(), 80);
+}

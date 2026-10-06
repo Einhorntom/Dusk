@@ -195,6 +195,10 @@ fn run(logger: &'static DaemonLogger) -> Result<(), Box<dyn std::error::Error>> 
         Ok(moved) => log::info!("moved {moved} preset and hotkey references to new monitor IDs"),
         Err(error) => log::warn!("cannot move presets and hotkeys to new monitor IDs: {error}"),
     }
+    // Buffered slider and hotkey values are written by the application,
+    // off the UI thread (SPEC-WR-2); the Settings window shows the results.
+    let commits = Arc::new(dusk_ui_win32::CommitNotifier::default());
+    service.start_committer(commits.clone())?;
     let request_service = service.clone();
     let _server = thread::spawn(move || {
         if let Err(error) =
@@ -208,6 +212,7 @@ fn run(logger: &'static DaemonLogger) -> Result<(), Box<dyn std::error::Error>> 
         options.native_ui,
         options.background,
         &instance_key,
+        commits,
     )?;
     Ok(())
 }

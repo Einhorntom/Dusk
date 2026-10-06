@@ -1,11 +1,14 @@
-//! Bounded monitor I/O (SPEC-MON-4): each monitor gets its own worker
-//! thread, so DDC/CI calls to one monitor are serialized and a hung monitor
-//! never blocks another. A call waits at most `timeout`; after a timeout the
-//! stuck worker is abandoned (it exits once the driver call returns) and the
-//! call is retried on a fresh worker, up to `attempts` times, before the
-//! monitor is reported as not responding.
+//! Bounded monitor I/O (SPEC-MON-4): each monitor gets one worker thread,
+//! so DDC/CI calls to one monitor are serialized and a hung monitor never
+//! blocks another. A call is sent once and waits up to `timeout` x
+//! `attempts` for its answer. A driver call cannot be cancelled, so when
+//! one times out the monitor is marked busy: further calls fail at once as
+//! "not responding" until the stuck call returns, instead of piling up or
+//! reaching the monitor alongside it. Calls still queued when their caller
+//! gives up are dropped, so a stale write never runs late.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -15,28 +18,41 @@ use dusk_domain::{ControlCapability, ControlKey, Monitor, MonitorId};
 
 use crate::{BackendError, MonitorBackend};
 
-/// SPEC-MON-4 defaults.
+/// SPEC-MON-4 defaults: one call waits up to 3 x 2 s.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(2);
 pub const DEFAULT_ATTEMPTS: u32 = 3;
 
-type Job = Box<dyn FnOnce(&dyn MonitorBackend) + Send>;
+type Call = Box<dyn FnOnce(&dyn MonitorBackend) + Send>;
+
+struct Job {
+    call: Call,
+    /// Set when the caller gave up; the job is then skipped if not started.
+    cancelled: Arc<AtomicBool>,
+    /// Set by the worker when the job has finished (or was skipped).
+    done: Arc<AtomicBool>,
+}
+
+#[derive(Clone)]
+struct Worker {
+    jobs: Sender<Job>,
+    /// A call timed out and has not returned yet.
+    busy: Arc<AtomicBool>,
+}
 
 /// Which worker runs a call: one per monitor, plus one for discovery.
 type WorkerKey = Option<MonitorId>;
 
 pub struct TimedBackend {
     inner: Arc<dyn MonitorBackend>,
-    timeout: Duration,
-    attempts: u32,
-    workers: Mutex<HashMap<WorkerKey, Sender<Job>>>,
+    wait: Duration,
+    workers: Mutex<HashMap<WorkerKey, Worker>>,
 }
 
 impl TimedBackend {
     pub fn new(inner: Arc<dyn MonitorBackend>, timeout: Duration, attempts: u32) -> Self {
         Self {
             inner,
-            timeout,
-            attempts: attempts.max(1),
+            wait: timeout * attempts.max(1),
             workers: Mutex::new(HashMap::new()),
         }
     }
@@ -48,74 +64,110 @@ impl TimedBackend {
     fn run<T: Send + 'static>(
         &self,
         key: WorkerKey,
-        call: impl Fn(&dyn MonitorBackend) -> Result<T, BackendError> + Clone + Send + 'static,
+        call: impl FnOnce(&dyn MonitorBackend) -> Result<T, BackendError> + Send + 'static,
     ) -> Result<T, BackendError> {
-        for _ in 0..self.attempts {
-            let (reply, result) = mpsc::channel();
-            let call = call.clone();
-            let job: Job = Box::new(move |backend| {
+        let worker = self.worker(&key)?;
+        if worker.busy.load(Ordering::SeqCst) {
+            return Err(not_responding(&key, "is still busy with an earlier call"));
+        }
+        let (reply, result) = mpsc::channel();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let done = Arc::new(AtomicBool::new(false));
+        let job = Job {
+            call: Box::new(move |backend| {
                 let _ = reply.send(call(backend));
-            });
-            if !self.send(&key, job) {
-                continue;
-            }
-            match result.recv_timeout(self.timeout) {
-                Ok(result) => return result,
-                // Stuck or crashed: abandon this worker and retry on a new one.
-                Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => {
-                    self.workers().remove(&key);
-                }
-            }
-        }
-        let what = match &key {
-            Some(monitor) => format!("monitor {monitor}"),
-            None => "monitor discovery".to_owned(),
+            }),
+            cancelled: cancelled.clone(),
+            done: done.clone(),
         };
-        Err(BackendError::NotResponding(format!(
-            "{what} is not responding (no answer within {} ms, {} attempts)",
-            self.timeout.as_millis(),
-            self.attempts
-        )))
-    }
-
-    /// Queues `job` on the key's worker, starting one if needed.
-    fn send(&self, key: &WorkerKey, job: Job) -> bool {
-        let mut workers = self.workers();
-        let sender = workers.entry(key.clone()).or_insert_with(|| {
-            let (sender, jobs) = mpsc::channel::<Job>();
-            let inner = self.inner.clone();
-            let name = match key {
-                Some(monitor) => format!("dusk-monitor-{monitor}"),
-                None => "dusk-discovery".to_owned(),
-            };
-            let spawned = thread::Builder::new().name(name).spawn(move || {
-                while let Ok(job) = jobs.recv() {
-                    job(inner.as_ref());
+        if worker.jobs.send(job).is_err() {
+            self.workers().remove(&key);
+            return Err(BackendError::Failed("the monitor worker stopped".into()));
+        }
+        match result.recv_timeout(self.wait) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => {
+                cancelled.store(true, Ordering::SeqCst);
+                // Busy until the call returns. If it finished meanwhile, the
+                // worker may already have cleared the flag before we set it.
+                worker.busy.store(true, Ordering::SeqCst);
+                if done.load(Ordering::SeqCst) {
+                    worker.busy.store(false, Ordering::SeqCst);
                 }
-            });
-            if let Err(error) = spawned {
-                log::error!("could not start a monitor worker: {error}");
+                Err(not_responding(
+                    &key,
+                    &format!("did not answer within {} ms", self.wait.as_millis()),
+                ))
             }
-            sender
-        });
-        if sender.send(job).is_ok() {
-            true
-        } else {
-            workers.remove(key);
-            false
+            // The call panicked and took the worker down; start a new one next time.
+            Err(RecvTimeoutError::Disconnected) => {
+                self.workers().remove(&key);
+                Err(BackendError::Failed(
+                    "the monitor call failed unexpectedly".into(),
+                ))
+            }
         }
     }
 
-    fn workers(&self) -> std::sync::MutexGuard<'_, HashMap<WorkerKey, Sender<Job>>> {
+    /// The key's worker, started if needed.
+    fn worker(&self, key: &WorkerKey) -> Result<Worker, BackendError> {
+        let mut workers = self.workers();
+        if let Some(worker) = workers.get(key) {
+            return Ok(worker.clone());
+        }
+        let (jobs, queue) = mpsc::channel::<Job>();
+        let busy = Arc::new(AtomicBool::new(false));
+        let inner = self.inner.clone();
+        let worker_busy = busy.clone();
+        let name = match key {
+            Some(monitor) => format!("dusk-monitor-{monitor}"),
+            None => "dusk-discovery".to_owned(),
+        };
+        thread::Builder::new()
+            .name(name)
+            .spawn(move || {
+                // Ends when the worker is dropped from the map and the
+                // current call has returned.
+                while let Ok(job) = queue.recv() {
+                    if !job.cancelled.load(Ordering::SeqCst) {
+                        (job.call)(inner.as_ref());
+                    }
+                    job.done.store(true, Ordering::SeqCst);
+                    worker_busy.store(false, Ordering::SeqCst);
+                }
+            })
+            .map_err(|error| {
+                log::error!("could not start a monitor worker: {error}");
+                BackendError::Failed(format!("could not start a monitor worker: {error}"))
+            })?;
+        let worker = Worker { jobs, busy };
+        workers.insert(key.clone(), worker.clone());
+        Ok(worker)
+    }
+
+    fn workers(&self) -> std::sync::MutexGuard<'_, HashMap<WorkerKey, Worker>> {
         self.workers
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
+fn not_responding(key: &WorkerKey, why: &str) -> BackendError {
+    let what = match key {
+        Some(monitor) => format!("monitor {monitor}"),
+        None => "monitor discovery".to_owned(),
+    };
+    BackendError::NotResponding(format!("{what} is not responding: it {why}"))
+}
+
 impl MonitorBackend for TimedBackend {
     fn list_monitors(&self) -> Result<Vec<Monitor>, BackendError> {
-        self.run(None, |backend| backend.list_monitors())
+        let monitors = self.run(None, |backend| backend.list_monitors())?;
+        // Workers of monitors that are gone end once their current call returns.
+        let listed: HashSet<&MonitorId> = monitors.iter().map(|monitor| &monitor.id).collect();
+        self.workers()
+            .retain(|key, _| key.as_ref().is_none_or(|monitor| listed.contains(monitor)));
+        Ok(monitors)
     }
 
     fn read_control(

@@ -16,9 +16,11 @@ mod hotkeys;
 
 pub use hotkeys::{HotkeyOutcome, HotkeyRepository};
 
+mod committer;
 mod composite;
 mod timed;
 
+pub use committer::CommitObserver;
 pub use composite::CompositeBackend;
 
 pub use timed::{DEFAULT_ATTEMPTS, DEFAULT_TIMEOUT, TimedBackend};
@@ -295,6 +297,12 @@ pub struct MonitorService {
     write_buffer: Mutex<WriteBuffer<WriteKey>>,
     rate_limiter: Mutex<RateLimiter<WriteKey>>,
     last_applied_preset: Mutex<Option<String>>,
+    /// Wakes the committer when a value is buffered.
+    wake: Arc<committer::Wake>,
+    /// Held across each load-change-save of presets, hotkeys or settings,
+    /// so concurrent edits (Settings window, IPC clients) cannot overwrite
+    /// each other.
+    edits: Mutex<()>,
 }
 
 type WriteKey = (MonitorId, ControlKey);
@@ -333,7 +341,17 @@ impl MonitorService {
             write_buffer: Mutex::new(WriteBuffer::default()),
             rate_limiter: Mutex::new(RateLimiter::default()),
             last_applied_preset: Mutex::new(None),
+            edits: Mutex::new(()),
+            wake: Arc::default(),
         }
+    }
+
+    /// Serializes read-modify-write use cases (see `edits`). Not re-entrant:
+    /// helpers called while it is held must not take it again.
+    pub(crate) fn editing(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.edits
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub fn list_monitors(&self) -> Result<Vec<Monitor>, UseCaseError> {
@@ -472,6 +490,7 @@ impl MonitorService {
             self.clock.now(),
             Duration::from_millis(settings.debounce_ms.into()),
         );
+        self.wake.notify();
         Ok(())
     }
 
@@ -566,6 +585,7 @@ impl MonitorService {
     }
 
     pub fn update_settings(&self, settings: AppSettings) -> Result<(), UseCaseError> {
+        let _edit = self.editing();
         settings.validate().map_err(UseCaseError::SettingsInvalid)?;
         self.settings.save(&settings)?;
         Ok(())
@@ -576,6 +596,7 @@ impl MonitorService {
     }
 
     pub fn save_preset(&self, preset: Preset) -> Result<(), UseCaseError> {
+        let _edit = self.editing();
         let name = validate_preset_name(&preset.name)?;
         let preset = Preset { name, ..preset };
         let mut presets = self.presets.load_presets()?;
@@ -630,6 +651,7 @@ impl MonitorService {
     }
 
     pub fn delete_preset(&self, name: &str) -> Result<(), UseCaseError> {
+        let _edit = self.editing();
         let mut presets = self.presets.load_presets()?;
         let before = presets.len();
         presets.retain(|preset| !preset_names_equal(&preset.name, name));
@@ -641,6 +663,7 @@ impl MonitorService {
     }
 
     pub fn rename_preset(&self, name: &str, new_name: &str) -> Result<(), UseCaseError> {
+        let _edit = self.editing();
         let new_name = validate_preset_name(new_name)?;
         let mut presets = self.presets.load_presets()?;
         let index = presets
@@ -660,6 +683,7 @@ impl MonitorService {
     }
 
     pub fn move_preset(&self, name: &str, offset: i32) -> Result<(), UseCaseError> {
+        let _edit = self.editing();
         let mut presets = self.presets.load_presets()?;
         let index = presets
             .iter()
@@ -675,6 +699,7 @@ impl MonitorService {
     }
 
     pub fn set_preset_entry(&self, name: &str, entry: PresetEntry) -> Result<(), UseCaseError> {
+        let _edit = self.editing();
         entry.validate()?;
         let mut presets = self.presets.load_presets()?;
         let preset = presets
@@ -699,6 +724,7 @@ impl MonitorService {
         monitor: &MonitorId,
         control: ControlKey,
     ) -> Result<(), UseCaseError> {
+        let _edit = self.editing();
         let mut presets = self.presets.load_presets()?;
         let preset = presets
             .iter_mut()
@@ -724,6 +750,7 @@ impl MonitorService {
 
     /// Merges (or, with `replace`, replaces) presets from an exported document.
     pub fn import_presets(&self, text: &str, replace: bool) -> Result<ImportSummary, UseCaseError> {
+        let _edit = self.editing();
         let imported = self.presets.parse_text(text)?;
         let mut presets = if replace {
             Vec::new()
@@ -772,6 +799,7 @@ impl MonitorService {
         &self,
         renames: &[(MonitorId, MonitorId)],
     ) -> Result<usize, UseCaseError> {
+        let _edit = self.editing();
         let connected: HashSet<MonitorId> = self
             .backend
             .list_monitors()?

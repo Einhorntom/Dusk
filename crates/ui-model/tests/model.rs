@@ -85,14 +85,15 @@ fn slider_moves_are_written_once_after_the_quiet_period() {
             .adjust_selected_value(ControlValue::Normalized(value))
             .unwrap();
     }
-    assert_eq!(model.flush_pending_adjustments().unwrap().0, 0);
-    h.clock.advance(Duration::from_millis(400));
-    assert_eq!(model.flush_pending_adjustments().unwrap(), (1, None));
-    assert_eq!(h.backend.written_values(), vec![65]);
+    // Shown at once; written by the application's committer, not the UI.
     assert_eq!(
         shown_value(&model, ControlKey::Brightness),
         Some(ControlValue::Normalized(65))
     );
+    assert_eq!(h.service.flush_pending_adjustments().unwrap().0, 0);
+    h.clock.advance(Duration::from_millis(400));
+    assert_eq!(h.service.flush_pending_adjustments().unwrap(), (1, None));
+    assert_eq!(h.backend.written_values(), vec![65]);
 }
 
 #[test]
@@ -265,4 +266,27 @@ fn an_incomplete_add_hotkey_form_explains_what_is_missing() {
     let no_action = model.hotkey_from_form("F9", None, None).unwrap_err();
     assert!(no_action.contains("Choose what"));
     assert!(model.hotkey_from_form("F9", Some(999), None).is_err());
+}
+
+#[test]
+fn gains_are_marked_unused_outside_the_user_colour_presets() {
+    // The reference monitor starts in 7500 K (0x06), a factory mode.
+    let (mut model, _h) = model_with(vec![FakeMonitor::reference("m")]);
+    assert_eq!(model.gains_unused_in(), Some(0x06));
+    assert_eq!(
+        dusk_ui_model::text::gains_unused_note(0x06),
+        "Not used in 7500 K; gains apply to the User colour presets."
+    );
+
+    model.select_control(ControlKey::ColorPreset);
+    model.set_selected_value(ControlValue::Enum(0x0B)).unwrap();
+    assert_eq!(model.gains_unused_in(), None, "User 1 uses the gains");
+
+    // A monitor without a colour preset makes no claim about gains.
+    let (bare, _h) = model_with(vec![FakeMonitor::new("b").numeric(
+        ControlKey::GainRed,
+        50,
+        100,
+    )]);
+    assert_eq!(bare.gains_unused_in(), None);
 }

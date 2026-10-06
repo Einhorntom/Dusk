@@ -15,13 +15,12 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::Shell::DefSubclassProc;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GA_ROOT, GetAncestor, IsWindowVisible, KillTimer, MSG, PostMessageW, SetTimer, SetWindowTextW,
-    WM_APP, WM_CHAR, WM_GETDLGCODE, WM_KEYDOWN, WM_KILLFOCUS, WM_SETFOCUS, WM_SYSCHAR,
-    WM_SYSKEYDOWN,
+    GA_ROOT, GetAncestor, IsWindowVisible, MSG, PostMessageW, SetWindowTextW, WM_APP, WM_CHAR,
+    WM_GETDLGCODE, WM_KEYDOWN, WM_KILLFOCUS, WM_SETFOCUS, WM_SYSCHAR, WM_SYSKEYDOWN,
 };
 use windows::core::{HRESULT, PCWSTR};
 
-use super::{SLIDER_TIMER, WindowContext, set_status, wide_null};
+use super::{WindowContext, set_status, tasks, wide_null};
 use crate::keys;
 use crate::modern::{self, osd};
 
@@ -167,6 +166,7 @@ fn start_worker(window: HWND, api: Arc<dyn Api>) -> Sender<(KeyCombo, String)> {
                 };
                 if posted.is_err() {
                     // The window is gone; nobody will take the result.
+                    // SAFETY: not posted, so this is still the only owner.
                     drop(unsafe { Box::from_raw(finished) });
                 }
             }
@@ -194,22 +194,33 @@ pub(crate) fn on_hotkey(context: &mut WindowContext, id: i32) {
         .submit(context.window, &api, keys, label);
 }
 
-/// Shows a finished hotkey: updates values, starts the commit timer for
-/// steps, and shows the on-screen indicator.
+/// Shows a finished hotkey: a step's new target at once (the application's
+/// committer writes it), or values re-read in the background after other
+/// actions; and the on-screen indicator.
 pub(crate) fn on_hotkey_finished(context: &mut WindowContext, lparam: LPARAM) {
     // SAFETY: only the hotkey worker posts this message, with a leaked Box.
     let finished = unsafe { Box::from_raw(lparam.0 as *mut Finished) };
     let show_indicator = context.model.settings().show_osd;
     match finished.result {
         Ok(outcome) => {
-            context.model.apply_hotkey_outcome(&outcome);
+            let reread = context.model.show_hotkey_outcome(&outcome);
             if let HotkeyOutcome::Stepped { control, .. } = &outcome {
-                start_commit_timer(context);
                 if !context.native_ui {
                     modern::show_control_value(context, *control);
                 }
-            } else if unsafe { IsWindowVisible(context.window) }.as_bool() {
-                super::refresh_view(context);
+            } else if reread {
+                let monitor = context.model.selected_monitor().cloned();
+                tasks::run(
+                    context,
+                    move |api| dusk_ui_model::fetch_after_change(api, monitor),
+                    |context, after| {
+                        // A monitor that was just switched off or away may not answer.
+                        let _ = context.model.apply_after_change(after);
+                        if unsafe { IsWindowVisible(context.window) }.as_bool() {
+                            super::refresh_view(context);
+                        }
+                    },
+                );
             }
             if show_indicator && let Some(indicator) = hotkey_indicator(&outcome) {
                 osd::show(&indicator);
@@ -224,25 +235,6 @@ pub(crate) fn on_hotkey_finished(context: &mut WindowContext, lparam: LPARAM) {
                     level: None,
                 });
             }
-        }
-    }
-}
-
-/// Step targets are written after the quiet period, like slider moves.
-fn start_commit_timer(context: &WindowContext) {
-    unsafe {
-        let _ = KillTimer(Some(context.window), SLIDER_TIMER);
-        if SetTimer(
-            Some(context.window),
-            SLIDER_TIMER,
-            context.model.settings().debounce_ms,
-            None,
-        ) == 0
-        {
-            set_status(
-                context,
-                "Could not start the write timer; the hotkey change was not sent.",
-            );
         }
     }
 }
@@ -276,6 +268,7 @@ pub(crate) unsafe extern "system" fn recording_subclass(
         WM_GETDLGCODE => {
             // Let Tab move focus; take every other key.
             let tab = lparam.0 != 0 && {
+                // SAFETY: for WM_GETDLGCODE, a non-zero LPARAM points to the MSG.
                 let message = unsafe { &*(lparam.0 as *const MSG) };
                 message.message == WM_KEYDOWN && message.wParam.0 == VK_TAB
             };

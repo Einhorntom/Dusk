@@ -122,6 +122,7 @@ version = "0.1.0"
 dependencies = [
  "dusk-app",
  "dusk-domain",
+ "log",
  "serde",
  "toml 0.8.23",
  "windows",
