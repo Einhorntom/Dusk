@@ -6,7 +6,7 @@ use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread;
 use std::time::Duration;
 
-use crate::{MonitorService, UseCaseError};
+use crate::{ControlApi, MonitorService, UseCaseError};
 
 /// Told about each commit, e.g. to show it or an error in the UI.
 pub trait CommitObserver: Send + Sync {
@@ -62,7 +62,7 @@ impl MonitorService {
         observer: Arc<dyn CommitObserver>,
     ) -> std::io::Result<()> {
         let service: Weak<Self> = Arc::downgrade(self);
-        let wake = self.wake.clone();
+        let wake = self.gate.wake.clone();
         thread::Builder::new()
             .name("dusk-committer".into())
             .spawn(move || {

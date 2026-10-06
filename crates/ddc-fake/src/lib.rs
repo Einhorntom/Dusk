@@ -115,6 +115,7 @@ struct State {
     failing_reads: HashMap<(MonitorId, ControlKey), BackendError>,
     failing_writes: HashMap<(MonitorId, ControlKey), BackendError>,
     hung: HashSet<MonitorId>,
+    reads: usize,
 }
 
 /// `MonitorBackend` over simulated monitors.
@@ -192,6 +193,11 @@ impl FakeBackend {
         self.state().writes.clear();
     }
 
+    /// How many control reads reached the simulated monitors.
+    pub fn read_count(&self) -> usize {
+        self.state().reads
+    }
+
     pub fn fail_reads(&self, monitor: &MonitorId, control: ControlKey, error: BackendError) {
         self.state()
             .failing_reads
@@ -252,7 +258,8 @@ impl MonitorBackend for FakeBackend {
         control: ControlKey,
     ) -> Result<Option<(ControlCapability, u32)>, BackendError> {
         self.wait_while_hung(monitor);
-        let state = self.state();
+        let mut state = self.state();
+        state.reads += 1;
         if state.disconnected.contains(monitor) {
             return Err(not_found(monitor));
         }

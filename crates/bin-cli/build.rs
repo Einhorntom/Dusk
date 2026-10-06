@@ -1,3 +1,6 @@
+// Cargo reads build-script instructions from stdout.
+#![allow(clippy::print_stdout)]
+
 fn main() {
     println!("cargo:rerun-if-changed=dusk.rc");
     println!("cargo:rerun-if-changed=../../assets/icons/dusk.ico");

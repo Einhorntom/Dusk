@@ -49,16 +49,26 @@ public sealed class PipeDaemon : IDaemon
     /// <summary>Same override as the daemon and the CLI.</summary>
     public const string PipeEnvironmentVariable = "DUSK_PIPE";
     private const int MaxMessageSize = 1_048_576;
+    /// <summary>The request format this client speaks (crates/ipc PROTOCOL_VERSION).</summary>
+    public const int ProtocolVersion = 1;
+
+    /// <summary>
+    /// How long to wait for an answer. Longer than the daemon's monitor
+    /// timeout (6 s), short enough that PowerToys never looks frozen.
+    /// </summary>
+    public static readonly TimeSpan DefaultResponseTimeout = TimeSpan.FromSeconds(15);
 
     private readonly string pipeName;
     private readonly int connectTimeoutMs;
+    private readonly TimeSpan responseTimeout;
 
-    public PipeDaemon(string? pipeName = null, TimeSpan? connectTimeout = null)
+    public PipeDaemon(string? pipeName = null, TimeSpan? connectTimeout = null, TimeSpan? responseTimeout = null)
     {
         var fromEnvironment = Environment.GetEnvironmentVariable(PipeEnvironmentVariable);
         this.pipeName = pipeName
             ?? (string.IsNullOrWhiteSpace(fromEnvironment) ? DefaultPipe : fromEnvironment.Trim());
         connectTimeoutMs = (int)(connectTimeout ?? TimeSpan.FromMilliseconds(500)).TotalMilliseconds;
+        this.responseTimeout = responseTimeout ?? DefaultResponseTimeout;
     }
 
     public IReadOnlyList<MonitorInfo> ListMonitors() =>
@@ -104,10 +114,16 @@ public sealed class PipeDaemon : IDaemon
             (int)result["failed"]!);
     }
 
-    /// <summary>Sends one request and returns its <c>result</c>.</summary>
+    /// <summary>
+    /// Sends one request and returns its <c>result</c>. Throws a
+    /// <see cref="DaemonException"/> with code 4 if no answer arrives within
+    /// the response timeout, e.g. while the daemon waits for the user to
+    /// confirm an input change or for a monitor that does not answer.
+    /// </summary>
     public JsonNode Send(JsonObject request)
     {
-        using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+        // Asynchronous so the read can be cancelled; a synchronous pipe read cannot time out.
+        using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         try
         {
             pipe.Connect(connectTimeoutMs);
@@ -116,8 +132,21 @@ public sealed class PipeDaemon : IDaemon
         {
             throw new DaemonUnavailableException();
         }
-        WriteFrame(pipe, Encoding.UTF8.GetBytes(request.ToJsonString()));
-        var response = JsonNode.Parse(ReadFrame(pipe))
+        request["protocol"] = ProtocolVersion;
+        using var deadline = new CancellationTokenSource(responseTimeout);
+        byte[] answer;
+        try
+        {
+            WriteFrame(pipe, Encoding.UTF8.GetBytes(request.ToJsonString()), deadline.Token);
+            answer = ReadFrame(pipe, deadline.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new DaemonException(
+                4,
+                $"Dusk did not answer within {responseTimeout.TotalSeconds:0.#} s. It may be waiting for you to confirm an input change, or for a monitor that does not respond.");
+        }
+        var response = JsonNode.Parse(answer)
             ?? throw new DaemonException(1, "the daemon sent an empty response");
         if (response["ok"]?.GetValue<bool>() != true)
         {
@@ -128,30 +157,30 @@ public sealed class PipeDaemon : IDaemon
         return response["result"] ?? throw new DaemonException(1, "the daemon sent no result");
     }
 
-    private static void WriteFrame(Stream pipe, byte[] payload)
+    private static void WriteFrame(Stream pipe, byte[] payload, CancellationToken cancel)
     {
         if (payload.Length > MaxMessageSize)
         {
             throw new DaemonException(2, "request exceeds the 1 MiB limit");
         }
-        Span<byte> header = stackalloc byte[4];
+        var header = new byte[4];
         BinaryPrimitives.WriteUInt32LittleEndian(header, (uint)payload.Length);
-        pipe.Write(header);
-        pipe.Write(payload);
-        pipe.Flush();
+        pipe.WriteAsync(header, cancel).AsTask().GetAwaiter().GetResult();
+        pipe.WriteAsync(payload, cancel).AsTask().GetAwaiter().GetResult();
+        pipe.FlushAsync(cancel).GetAwaiter().GetResult();
     }
 
-    private static byte[] ReadFrame(Stream pipe)
+    private static byte[] ReadFrame(Stream pipe, CancellationToken cancel)
     {
-        Span<byte> header = stackalloc byte[4];
-        pipe.ReadExactly(header);
+        var header = new byte[4];
+        pipe.ReadExactlyAsync(header, cancel).AsTask().GetAwaiter().GetResult();
         var length = BinaryPrimitives.ReadUInt32LittleEndian(header);
         if (length > MaxMessageSize)
         {
             throw new DaemonException(1, "response exceeds the 1 MiB limit");
         }
         var payload = new byte[length];
-        pipe.ReadExactly(payload);
+        pipe.ReadExactlyAsync(payload, cancel).AsTask().GetAwaiter().GetResult();
         return payload;
     }
 }

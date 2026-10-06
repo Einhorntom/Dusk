@@ -51,12 +51,12 @@ Findings of a full design and code review, most important first. Tick an item wh
 
 ### P3: maintainability and polish
 
-- [ ] **R9. Error types.** Mostly `BackendError::Failed(String)`; "no presets are defined" and "monitor has no supported controls" use `SettingsInvalid` (CLI exit code 2, "invalid usage"); a missing preset entry is `PresetNotFound`.
-- [ ] **R10. `MonitorService` does too much.** Four APIs in about 900 lines plus about 130 lines of delegation; v2 schedules would grow it. Fix: control, preset and hotkey services sharing one write gate.
-- [ ] **R11. Redundant work per call.** Each read or write re-enumerates all monitors, opens and closes their handles and queries the display configuration; each slider commit reads before writing (double DDC/CI traffic). Fix: cache the monitor list, refresh it when displays change.
-- [ ] **R12. C# client has no read timeout.** PowerToys Run or Command Palette hangs while the daemon waits on an input confirmation or a monitor timeout.
-- [ ] **R13. Doc drift and release basics.** ARCH describes background capability prefetch that does not exist (EDID IDs and logging now match ARCH); `spikes/windows-ddc` is still a workspace member; no workspace lints or release profile; every crate is 0.1.0; the pipe protocol has no version check.
-- [ ] **R14. Rate-limit deferral message as info.** "monitor write rate limit deferred <control> for <monitor>" is logged as a warning; the owner wants it kept in the log as an info message (the deferral is expected behavior, not a problem).
+- [x] **R9. Error types.** Mostly `BackendError::Failed(String)`; "no presets are defined" and "monitor has no supported controls" use `SettingsInvalid` (CLI exit code 2, "invalid usage"); a missing preset entry is `PresetNotFound`.
+- [x] **R10. `MonitorService` does too much.** Four APIs in about 900 lines plus about 130 lines of delegation; v2 schedules would grow it. Fix: control, preset and hotkey services sharing one write gate.
+- [x] **R11. Redundant work per call.** Each read or write re-enumerates all monitors, opens and closes their handles and queries the display configuration; each slider commit reads before writing (double DDC/CI traffic). Fix: cache the monitor list, refresh it when displays change.
+- [x] **R12. C# client has no read timeout.** PowerToys Run or Command Palette hangs while the daemon waits on an input confirmation or a monitor timeout.
+- [x] **R13. Doc drift and release basics.** ARCH describes background capability prefetch that does not exist (EDID IDs and logging now match ARCH); `spikes/windows-ddc` is still a workspace member; no workspace lints or release profile; every crate is 0.1.0; the pipe protocol has no version check.
+- [x] **R14. Rate-limit deferral message as info.** "monitor write rate limit deferred <control> for <monitor>" is logged as a warning; the owner wants it kept in the log as an info message (the deferral is expected behavior, not a problem).
 
 ## Next implementation steps
 

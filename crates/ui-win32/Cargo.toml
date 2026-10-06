@@ -1,7 +1,8 @@
 [package]
 name = "dusk-ui-win32"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 publish = false
 
 [dependencies]
@@ -23,3 +24,6 @@ windows = { version = "0.62", features = [
     "Win32_System_LibraryLoader",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[lints]
+workspace = true

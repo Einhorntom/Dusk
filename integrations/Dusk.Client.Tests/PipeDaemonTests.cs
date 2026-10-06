@@ -45,6 +45,7 @@ public class PipeDaemonTests
         var request = await served;
 
         Assert.Equal("get", (string?)request["op"]);
+        Assert.Equal(PipeDaemon.ProtocolVersion, (int)request["protocol"]!);
         Assert.Equal("L32p-30#0", (string?)request["monitor"]);
         Assert.Equal(49, reading.Value);
         Assert.Equal("USB-C", reading.ValueName);
@@ -73,6 +74,30 @@ public class PipeDaemonTests
         await served;
         Assert.Equal(3, error.Code);
         Assert.Equal("preset not found: Nope", error.Message);
+    }
+
+    [Fact]
+    public async Task A_daemon_that_does_not_answer_times_out_instead_of_hanging()
+    {
+        var pipe = UniquePipe();
+        using var release = new ManualResetEventSlim();
+        var server = Task.Run(() =>
+        {
+            using var stream = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1);
+            stream.WaitForConnection();
+            // Takes the request, then never answers (like a pending confirmation).
+            release.Wait(TimeSpan.FromSeconds(10));
+        });
+        var daemon = new PipeDaemon(pipe, TimeSpan.FromSeconds(5), TimeSpan.FromMilliseconds(300));
+        var started = DateTime.UtcNow;
+
+        var error = Assert.Throws<DaemonException>(() => daemon.ListPresets());
+
+        Assert.Equal(4, error.Code);
+        Assert.Contains("did not answer within 0.3 s", error.Message);
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(3), "gave up in time");
+        release.Set();
+        await server;
     }
 
     [Fact]

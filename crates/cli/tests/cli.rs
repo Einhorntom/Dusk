@@ -151,3 +151,22 @@ fn preset_path_reports_the_store_location() {
     let output = json(&cli(&h, &["--json", "preset", "path"]).unwrap());
     assert_eq!(output["result"]["path"], "memory://presets");
 }
+
+#[test]
+fn every_request_names_the_protocol_and_version_reports_it() {
+    let h = harness();
+    let service = h.service.clone();
+    let args: Vec<String> = ["--json", "version"]
+        .iter()
+        .map(|arg| arg.to_string())
+        .collect();
+    let output = run_with(&args, &move |request| {
+        let sent: Value = serde_json::from_slice(request).unwrap();
+        assert_eq!(sent["protocol"], dusk_ipc::PROTOCOL_VERSION, "{sent}");
+        Ok(dispatch(&*service, request))
+    })
+    .unwrap();
+    let parsed = json(&output);
+    assert_eq!(parsed["result"]["protocol"], dusk_ipc::PROTOCOL_VERSION);
+    assert!(parsed["result"]["daemon"].is_string());
+}

@@ -1,5 +1,6 @@
 //! The Settings view model over simulated monitors.
 
+use dusk_app::ControlApi;
 use std::time::Duration;
 
 use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};

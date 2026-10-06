@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::io;
 use std::ptr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use windows::Win32::Devices::Display::{
     CapabilitiesRequestAndCapabilitiesReply, DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
     DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_MODE_INFO,
@@ -32,6 +32,11 @@ use identity::{Candidate, assign_ids, device_instance, pair_outputs, parse_edid}
 
 /// A physical-monitor handle, released when dropped.
 struct OwnedPhysical(PHYSICAL_MONITOR);
+
+// SAFETY: a Dxva2 physical-monitor handle is not tied to the thread that
+// opened it; `TimedBackend` sends the calls for one monitor one at a time.
+unsafe impl Send for OwnedPhysical {}
+unsafe impl Sync for OwnedPhysical {}
 
 impl Drop for OwnedPhysical {
     fn drop(&mut self) {
@@ -61,11 +66,18 @@ struct DisplayOutput {
     device_path: Option<String>,
 }
 
+/// The Windows displays (handle and GDI name) a discovery was made for.
+type DisplaySignature = Vec<(isize, Option<String>)>;
+
 #[derive(Default)]
 pub struct WindowsDdcBackend {
     /// Keyed by device path, so a monitor plugged into another monitor's
     /// place never gets that monitor's capabilities.
     capability_cache: Mutex<HashMap<String, Capabilities>>,
+    /// The last discovery, reused while Windows reports the same displays.
+    /// Opening monitors, reading the display configuration and the EDIDs
+    /// then happens only when displays change or a monitor call fails.
+    discovered: Mutex<Option<(DisplaySignature, Arc<[PhysicalMonitor]>)>>,
 }
 
 impl WindowsDdcBackend {
@@ -79,20 +91,51 @@ impl WindowsDdcBackend {
     pub fn legacy_id_renames(&self) -> Result<Vec<(MonitorId, MonitorId)>, BackendError> {
         Ok(self
             .discover()?
-            .into_iter()
+            .iter()
             .filter(|monitor| monitor.legacy_id != monitor.id)
             .map(|monitor| (monitor.legacy_id.clone(), monitor.id.clone()))
             .collect())
     }
 
-    fn discover(&self) -> Result<Vec<PhysicalMonitor>, BackendError> {
+    /// The connected monitors, from the cache while the displays are the same.
+    fn discover(&self) -> Result<Arc<[PhysicalMonitor]>, BackendError> {
         let mut display_handles = Vec::new();
         let callback: MONITORENUMPROC = Some(collect_display_handle);
         let callback_data = LPARAM(&mut display_handles as *mut Vec<HMONITOR> as isize);
         if !unsafe { EnumDisplayMonitors(None, None, callback, callback_data).as_bool() } {
             return Err(last_error("EnumDisplayMonitors"));
         }
+        let signature: DisplaySignature = display_handles
+            .iter()
+            .map(|handle: &HMONITOR| (handle.0 as isize, gdi_device_name(*handle)))
+            .collect();
+        let mut discovered = self
+            .discovered
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((known, monitors)) = discovered.as_ref()
+            && *known == signature
+        {
+            return Ok(monitors.clone());
+        }
+        let monitors: Arc<[PhysicalMonitor]> = self.open_monitors(display_handles)?.into();
+        *discovered = Some((signature, monitors.clone()));
+        Ok(monitors)
+    }
 
+    /// Drops the cached discovery, e.g. after a monitor call failed because
+    /// the monitor was swapped or its handle went stale.
+    fn forget_monitors(&self) {
+        *self
+            .discovered
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+
+    fn open_monitors(
+        &self,
+        display_handles: Vec<HMONITOR>,
+    ) -> Result<Vec<PhysicalMonitor>, BackendError> {
         // If Windows cannot report its display paths, nothing is excluded
         // (listing the panel twice beats hiding a monitor) and IDs fall back
         // to positions.
@@ -215,7 +258,7 @@ impl MonitorBackend for WindowsDdcBackend {
     fn list_monitors(&self) -> Result<Vec<Monitor>, BackendError> {
         self.discover().map(|items| {
             items
-                .into_iter()
+                .iter()
                 .map(|item| Monitor {
                     id: item.id.clone(),
                     name: item.name.clone(),
@@ -236,6 +279,39 @@ impl MonitorBackend for WindowsDdcBackend {
                 "monitor not found: {monitor}"
             )));
         };
+        let result = self.read_physical(physical, control);
+        if result.is_err() {
+            self.forget_monitors();
+        }
+        result
+    }
+
+    fn write_control(
+        &self,
+        monitor: &MonitorId,
+        control: ControlKey,
+        native_value: u32,
+    ) -> Result<(), BackendError> {
+        let monitors = self.discover()?;
+        let Some(physical) = monitors.iter().find(|item| &item.id == monitor) else {
+            return Err(BackendError::NotFound(format!(
+                "monitor not found: {monitor}"
+            )));
+        };
+        let result = self.write_physical(physical, control, native_value);
+        if result.is_err() {
+            self.forget_monitors();
+        }
+        result
+    }
+}
+
+impl WindowsDdcBackend {
+    fn read_physical(
+        &self,
+        physical: &PhysicalMonitor,
+        control: ControlKey,
+    ) -> Result<Option<(ControlCapability, u32)>, BackendError> {
         let vcp = control.vcp_code();
         let capabilities = self.capabilities_for(physical)?;
         let Some(enum_values) = capabilities.vcp.get(&vcp) else {
@@ -262,18 +338,12 @@ impl MonitorBackend for WindowsDdcBackend {
         Ok(Some((capability, current)))
     }
 
-    fn write_control(
+    fn write_physical(
         &self,
-        monitor: &MonitorId,
+        physical: &PhysicalMonitor,
         control: ControlKey,
         native_value: u32,
     ) -> Result<(), BackendError> {
-        let monitors = self.discover()?;
-        let Some(physical) = monitors.iter().find(|item| &item.id == monitor) else {
-            return Err(BackendError::NotFound(format!(
-                "monitor not found: {monitor}"
-            )));
-        };
         let code = control.vcp_code();
         if !self.capabilities_for(physical)?.vcp.contains_key(&code) {
             return Err(BackendError::Failed(format!(

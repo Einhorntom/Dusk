@@ -1,3 +1,6 @@
+// Cargo reads build-script instructions from stdout.
+#![allow(clippy::print_stdout)]
+
 fn main() {
     for file in [
         "duskd.rc",

@@ -32,7 +32,7 @@ Dusk talks to external monitors over **DDC/CI** (the standard monitor-control ch
 ```powershell
 git clone https://github.com/<you>/dusk.git
 cd dusk
-cargo build --release --bins
+cargo build --release --bins                # LTO, stripped: duskd.exe is about 1.5 MB
 .\target\release\duskd.exe
 ```
 
@@ -53,6 +53,7 @@ The CLI works only while `duskd` is running, so every change goes through the sa
 
 ```powershell
 dusk list                                   # monitors and their IDs (model#serial)
+dusk version                                # the running daemon's version and protocol
 dusk get L32p-30#U5ABC123 brightness
 dusk set L32p-30#U5ABC123 brightness 40      # 0-100
 dusk set Built-in-display brightness 30
@@ -64,7 +65,7 @@ dusk preset import presets.toml             # ...and bring it back
 dusk --json preset list
 ```
 
-Run `dusk` without arguments for the full command list. Exit codes: `0` success, `1` error, `2` invalid usage or value, `3` monitor or preset not found, `4` monitor not responding, `5` preset partly applied, `6` input change declined or reverted, `7` Dusk is not running.
+Run `dusk` without arguments for the full command list. Exit codes: `0` success, `1` error, `2` invalid usage or value, `3` monitor, preset or hotkey not found, `4` monitor not responding, `5` preset partly applied, `6` input change declined or reverted, `7` Dusk is not running.
 
 ## PowerToys integration
 

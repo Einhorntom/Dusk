@@ -1,5 +1,6 @@
 //! SPEC-IN: input changes are confirmed and can be reverted.
 
+use dusk_app::{ControlApi, PresetApi};
 use dusk_app::{EntryStatus, UseCaseError};
 use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness, ScriptedPrompter};
 use dusk_domain::{ControlKey, ControlValue, MonitorId, Preset, PresetEntry};

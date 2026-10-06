@@ -2,7 +2,8 @@
 
 use std::time::Duration;
 
-use dusk_app::{Clock, UseCaseError};
+use dusk_app::{Clock, KNOWN_VALUE_TTL, UseCaseError};
+use dusk_app::{ControlApi, SettingsApi};
 use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
 use dusk_domain::{ControlKey, ControlValue, MIN_WRITE_INTERVAL, MonitorId};
 
@@ -145,4 +146,38 @@ fn settings_are_validated_before_saving() {
     settings.debounce_ms = 800;
     h.service.update_settings(settings.clone()).unwrap();
     assert_eq!(h.settings.stored(), settings);
+}
+
+#[test]
+fn committing_reuses_a_recently_read_value_instead_of_reading_again() {
+    // R11: each commit used to read the control first, doubling the DDC/CI
+    // traffic of slider moves and hotkey steps.
+    let h = Harness::new(FakeBackend::single(FakeMonitor::reference("m")));
+    let id = MonitorId::new("m").unwrap();
+    let commit = |value: u32| {
+        h.service
+            .adjust(&id, ControlKey::Brightness, ControlValue::Normalized(value))
+            .unwrap();
+        h.clock.advance(Duration::from_millis(400));
+        h.service.flush_pending_adjustments().unwrap();
+    };
+    commit(60);
+    let reads = h.backend.read_count();
+    // Past the rate-limit slot, still within the known-value time.
+    h.clock.advance(MIN_WRITE_INTERVAL);
+    commit(70);
+    assert_eq!(
+        h.backend.read_count(),
+        reads,
+        "no read for the second commit"
+    );
+    assert_eq!(h.backend.written_values(), [60, 70]);
+
+    // Once it is old, the value is read again, so a change made with the
+    // monitor's own buttons is noticed: 70 is written again over 30.
+    h.backend.set_value(&id, ControlKey::Brightness, 30);
+    h.clock.advance(KNOWN_VALUE_TTL);
+    commit(70);
+    assert_eq!(h.backend.read_count(), reads + 1);
+    assert_eq!(h.backend.written_values(), [60, 70, 70]);
 }

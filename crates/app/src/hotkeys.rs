@@ -7,7 +7,9 @@ use dusk_domain::{
     preset_names_equal,
 };
 
-use crate::{ApplyReport, BackendError, MonitorService, UseCaseError};
+use crate::{
+    ApplyReport, BackendError, ControlApi, HotkeyApi, MonitorService, PresetApi, UseCaseError,
+};
 
 pub trait HotkeyRepository: Send + Sync {
     fn load_hotkeys(&self) -> Result<Vec<HotkeyBinding>, BackendError>;
@@ -39,13 +41,13 @@ const POWER_ON: u32 = 0x01;
 /// most monitors, so the same hotkey can turn the display back on.
 const POWER_OFF_MODES: [u32; 4] = [0x04, 0x02, 0x03, 0x05];
 
-impl MonitorService {
-    pub fn list_hotkeys(&self) -> Result<Vec<HotkeyBinding>, UseCaseError> {
+impl HotkeyApi for MonitorService {
+    fn list_hotkeys(&self) -> Result<Vec<HotkeyBinding>, UseCaseError> {
         Ok(self.hotkeys.load_hotkeys()?)
     }
 
     /// Adds a binding, or replaces the one with the same key combination.
-    pub fn save_hotkey(&self, binding: HotkeyBinding) -> Result<(), UseCaseError> {
+    fn save_hotkey(&self, binding: HotkeyBinding) -> Result<(), UseCaseError> {
         let _edit = self.editing();
         binding.keys.validate()?;
         if let HotkeyAction::ApplyPreset(name) = &binding.action
@@ -66,7 +68,7 @@ impl MonitorService {
         Ok(())
     }
 
-    pub fn remove_hotkey(&self, keys: &KeyCombo) -> Result<(), UseCaseError> {
+    fn remove_hotkey(&self, keys: &KeyCombo) -> Result<(), UseCaseError> {
         let _edit = self.editing();
         let mut hotkeys = self.hotkeys.load_hotkeys()?;
         let before = hotkeys.len();
@@ -79,7 +81,7 @@ impl MonitorService {
     }
 
     /// Key combinations whose action applies the named preset (SPEC-PRE-5).
-    pub fn hotkeys_using_preset(&self, name: &str) -> Result<Vec<KeyCombo>, UseCaseError> {
+    fn hotkeys_using_preset(&self, name: &str) -> Result<Vec<KeyCombo>, UseCaseError> {
         Ok(self
             .hotkeys
             .load_hotkeys()?
@@ -93,6 +95,46 @@ impl MonitorService {
             .collect())
     }
 
+    /// Runs the binding currently stored for `keys`. Looking it up at press
+    /// time picks up preset renames made elsewhere (for example by the CLI).
+    fn run_hotkey(&self, keys: &KeyCombo) -> Result<HotkeyOutcome, UseCaseError> {
+        let binding = self
+            .hotkeys
+            .load_hotkeys()?
+            .into_iter()
+            .find(|item| item.keys == *keys)
+            .ok_or_else(|| UseCaseError::HotkeyNotFound(keys.to_string()))?;
+        match &binding.action {
+            HotkeyAction::ApplyPreset(name) => Ok(HotkeyOutcome::Preset(self.apply_preset(name)?)),
+            HotkeyAction::NextPreset => Ok(HotkeyOutcome::Preset(self.cycle_preset(true)?)),
+            HotkeyAction::PreviousPreset => Ok(HotkeyOutcome::Preset(self.cycle_preset(false)?)),
+            HotkeyAction::Step { control, up } => {
+                let targets = self.hotkey_targets(&binding)?;
+                let values = each_target(&targets, |monitor| {
+                    self.step(monitor, *control, *up)
+                        .map(|value| (monitor.clone(), value))
+                })?;
+                Ok(HotkeyOutcome::Stepped {
+                    control: *control,
+                    values,
+                })
+            }
+            HotkeyAction::SetInput(value) => {
+                let targets = self.hotkey_targets(&binding)?;
+                let results = each_target(&targets, |monitor| {
+                    self.set(monitor, ControlKey::Input, ControlValue::Enum(*value))
+                })?;
+                Ok(HotkeyOutcome::Input {
+                    value: *value,
+                    changed: results.into_iter().filter(|changed| *changed).count(),
+                })
+            }
+            HotkeyAction::TogglePower => self.toggle_power(&binding),
+        }
+    }
+}
+
+impl MonitorService {
     /// Points hotkeys for a renamed preset at its new name.
     pub(crate) fn rename_preset_in_hotkeys(
         &self,
@@ -129,44 +171,6 @@ impl MonitorService {
             self.hotkeys.save_hotkeys(&hotkeys)?;
         }
         Ok(())
-    }
-
-    /// Runs the binding currently stored for `keys`. Looking it up at press
-    /// time picks up preset renames made elsewhere (for example by the CLI).
-    pub fn run_hotkey(&self, keys: &KeyCombo) -> Result<HotkeyOutcome, UseCaseError> {
-        let binding = self
-            .hotkeys
-            .load_hotkeys()?
-            .into_iter()
-            .find(|item| item.keys == *keys)
-            .ok_or_else(|| UseCaseError::HotkeyNotFound(keys.to_string()))?;
-        match &binding.action {
-            HotkeyAction::ApplyPreset(name) => Ok(HotkeyOutcome::Preset(self.apply_preset(name)?)),
-            HotkeyAction::NextPreset => Ok(HotkeyOutcome::Preset(self.cycle_preset(true)?)),
-            HotkeyAction::PreviousPreset => Ok(HotkeyOutcome::Preset(self.cycle_preset(false)?)),
-            HotkeyAction::Step { control, up } => {
-                let targets = self.hotkey_targets(&binding)?;
-                let values = each_target(&targets, |monitor| {
-                    self.step(monitor, *control, *up)
-                        .map(|value| (monitor.clone(), value))
-                })?;
-                Ok(HotkeyOutcome::Stepped {
-                    control: *control,
-                    values,
-                })
-            }
-            HotkeyAction::SetInput(value) => {
-                let targets = self.hotkey_targets(&binding)?;
-                let results = each_target(&targets, |monitor| {
-                    self.set(monitor, ControlKey::Input, ControlValue::Enum(*value))
-                })?;
-                Ok(HotkeyOutcome::Input {
-                    value: *value,
-                    changed: results.into_iter().filter(|changed| *changed).count(),
-                })
-            }
-            HotkeyAction::TogglePower => self.toggle_power(&binding),
-        }
     }
 
     /// Moves a control's target by its step size, starting from a pending

@@ -1,5 +1,6 @@
 //! SPEC-PRE: capture, apply, edit, import/export and matching of presets.
 
+use dusk_app::PresetApi;
 use dusk_app::{BackendError, COLOR_MODE_SETTLE, Clock, EntryStatus, UseCaseError};
 use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
 use dusk_domain::{ControlKey, ControlValue, DomainError, MonitorId, Preset, PresetEntry};
@@ -92,7 +93,7 @@ fn capture_fails_for_a_monitor_without_capturable_controls() {
     let (h, id) = harness_for(FakeMonitor::new("bare"));
     assert!(matches!(
         h.service.capture_preset("Empty", &id, true),
-        Err(UseCaseError::SettingsInvalid(_))
+        Err(UseCaseError::NothingToCapture(monitor)) if monitor == id
     ));
     assert!(h.presets.stored().is_empty());
 }
@@ -340,7 +341,10 @@ fn preset_names_are_unique_case_insensitively_and_can_be_renamed_moved_and_delet
 #[test]
 fn cycling_wraps_around_starting_from_the_last_applied_preset() {
     let (h, id) = harness();
-    assert!(h.service.cycle_preset(true).is_err());
+    assert!(matches!(
+        h.service.cycle_preset(true),
+        Err(UseCaseError::NoPresets)
+    ));
     for name in ["A", "B"] {
         h.service.capture_preset(name, &id, false).unwrap();
     }
@@ -419,7 +423,10 @@ fn entries_can_be_added_changed_and_removed() {
     assert!(matches!(
         h.service
             .remove_preset_entry("P", &id, ControlKey::Brightness),
-        Err(UseCaseError::PresetNotFound(_))
+        Err(UseCaseError::PresetEntryNotFound {
+            control: ControlKey::Brightness,
+            ..
+        })
     ));
 }
 

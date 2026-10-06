@@ -45,6 +45,7 @@ fn run_command(
     }
     let request = match args {
         [command] if command == "list" => json!({ "op": "list" }),
+        [command] if command == "version" => json!({ "op": "version" }),
         [command, monitor, control] if command == "get" => {
             parse_control(control, json_output)?;
             json!({ "op": "get", "monitor": monitor, "control": control })
@@ -118,7 +119,12 @@ fn exchange(
     json_output: bool,
     transport: Transport<'_>,
 ) -> Result<Value, CliError> {
-    let bytes = serde_json::to_vec(request)
+    // Every request names the protocol, so a mismatched daemon says so.
+    let mut request = request.clone();
+    if let Some(fields) = request.as_object_mut() {
+        fields.insert("protocol".into(), json!(dusk_ipc::PROTOCOL_VERSION));
+    }
+    let bytes = serde_json::to_vec(&request)
         .map_err(|error| cli_error(&error.to_string(), 1, json_output))?;
     let response = transport(&bytes).map_err(|error| {
         let exit_code = match error {
@@ -290,7 +296,7 @@ fn parse_control(value: &str, json_output: bool) -> Result<ControlKey, CliError>
 fn usage_error(message: &str, json_output: bool) -> CliError {
     cli_error(
         &format!(
-            "{message}\nUsage: dusk [--json] list | get <monitor-id> <control> | \
+            "{message}\nUsage: dusk [--json] list | version | get <monitor-id> <control> | \
              set <monitor-id> <control> <value> | settings show | preset list | \
              preset apply <name> | preset next | preset prev | \
              preset save <name> [monitor-id] [--include-input] | preset delete <name> [--force] | \

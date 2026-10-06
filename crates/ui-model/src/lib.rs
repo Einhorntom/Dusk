@@ -163,8 +163,8 @@ impl MonitorSettingsModel {
     /// Selects `id` and clears its controls until they are read.
     pub fn begin_select_monitor(&mut self, id: &MonitorId) -> Result<MonitorId, UseCaseError> {
         if !self.monitors.iter().any(|monitor| &monitor.id == id) {
-            return Err(UseCaseError::SettingsInvalid(
-                "selected monitor is no longer available",
+            return Err(UseCaseError::NoSelection(
+                "the selected monitor is no longer available",
             ));
         }
         self.selected_monitor = Some(id.clone());
@@ -192,10 +192,10 @@ impl MonitorSettingsModel {
         let monitor = self
             .selected_monitor
             .clone()
-            .ok_or(UseCaseError::SettingsInvalid("no monitor is selected"))?;
+            .ok_or(UseCaseError::NoSelection("no monitor is selected"))?;
         let control = self
             .selected_control
-            .ok_or(UseCaseError::SettingsInvalid("no control is selected"))?;
+            .ok_or(UseCaseError::NoSelection("no control is selected"))?;
         Ok((monitor, control))
     }
 
@@ -305,7 +305,7 @@ impl MonitorSettingsModel {
         let monitor = self
             .selected_monitor
             .clone()
-            .ok_or(UseCaseError::SettingsInvalid("no monitor is selected"))?;
+            .ok_or(UseCaseError::NoSelection("no monitor is selected"))?;
         let preset = self.api.capture_preset(name, &monitor, include_input)?;
         self.refresh_presets()?;
         Ok(preset)

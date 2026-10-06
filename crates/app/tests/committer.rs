@@ -4,6 +4,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use dusk_app::ControlApi;
 use dusk_app::{BackendError, CommitObserver, UseCaseError};
 use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
 use dusk_domain::{ControlKey, ControlValue, MonitorId};

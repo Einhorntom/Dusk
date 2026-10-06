@@ -56,7 +56,7 @@ Requirement keywords: **MUST**, **SHOULD**, **MAY**. Each requirement has an ID 
 - SPEC-WR-1: User adjustments (slider drag, repeated hotkey, CLI `set`) update an in-memory target value immediately; the UI shows it instantly.
 - SPEC-WR-2: A commit happens only after the quiet period (default 400 ms; allowed 150-2000 ms) with no newer change to that control.
 - SPEC-WR-3: Only the latest target is committed; intermediate values are discarded.
-- SPEC-WR-4: A commit MUST be skipped if the target equals the last known monitor value.
+- SPEC-WR-4: A commit MUST be skipped if the target equals the last known monitor value. A value read from or written to the monitor in the last 5 s counts as known, so quick successive commits are not each read back first; an older value is read again before committing, so a change made with the monitor's own buttons is noticed.
 - SPEC-WR-5: The app MUST NOT write to a monitor at startup, at exit, on monitor refresh, or while only reading.
 - SPEC-WR-6: Per monitor and control, commits are limited to 1 per second and 30 per minute (not for the built-in display, SPEC-PNL-4). Excess changes are held (latest wins) and applied when the limit allows; a warning is logged.
 - SPEC-WR-7: CLI `set` and preset apply are explicit user actions: they commit without the quiet period, but still follow SPEC-WR-4 and SPEC-WR-6.
@@ -132,7 +132,7 @@ Executable: `dusk`. Global flags: `--json`, `--monitor <id|alias|index>`, `--qui
 | `schedule pause` / `resume` / `status` | Control the schedule. |
 | `audit` | Print commit counts (SPEC-WR-10). |
 
-Exit codes: `0` success; `1` general error; `2` invalid usage or value; `3` monitor not found; `4` monitor not responding; `5` partially applied (some preset entries failed); `6` user declined or revert triggered; `7` app not running.
+`dusk version` shows the running daemon's version and protocol. Exit codes: `0` success; `1` general error; `2` invalid usage or value; `3` monitor, preset, preset entry or hotkey not found (including cycling with no presets); `4` monitor not responding; `5` partially applied (some preset entries failed); `6` user declined or revert triggered; `7` app not running.
 - SPEC-CLI-1: With `--json`, stdout contains a single JSON object (`ok`, `result`, `error`); no other text on stdout.
 - SPEC-CLI-2: The CLI is a client of the running app and always delegates to it, so buffering, rate limits and input confirmation are shared (SPEC-WR-6). If the app is not running, the CLI MUST NOT touch any monitor or start the app; it prints an error saying the app is not running and exits with code `7`. With `--json` the error is reported in the JSON object (SPEC-CLI-1).
 - SPEC-CLI-3: Typical CLI latency to a monitor change is under 200 ms with the app running, excluding monitor latency.

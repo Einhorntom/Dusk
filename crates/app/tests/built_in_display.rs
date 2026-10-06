@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 use dusk_app::{Clock, UseCaseError};
+use dusk_app::{ControlApi, PresetApi};
 use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
 use dusk_domain::{ControlKey, ControlValue, MonitorId, Preset, PresetEntry};
 

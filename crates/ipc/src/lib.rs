@@ -13,6 +13,8 @@ const MAX_MESSAGE_SIZE: usize = 1_048_576;
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Request {
+    /// The protocol and daemon version.
+    Version,
     List,
     Get {
         monitor: String,
@@ -225,6 +227,11 @@ struct SetDto {
     changed: bool,
 }
 
+/// The request/response format clients and the daemon agree on. Clients
+/// send it as `"protocol"` in every request; a request without it is from
+/// an older client and is accepted. Bump it for incompatible changes.
+pub const PROTOCOL_VERSION: u64 = 1;
+
 pub fn dispatch(service: &dyn Api, input: &[u8]) -> Vec<u8> {
     let result = dispatch_inner(service, input);
     let response = match result {
@@ -256,9 +263,26 @@ struct DispatchError {
 }
 
 fn dispatch_inner(service: &dyn Api, input: &[u8]) -> Result<serde_json::Value, DispatchError> {
-    let request: Request =
+    let request: serde_json::Value =
         serde_json::from_slice(input).map_err(|error| DispatchError::new(2, error.to_string()))?;
+    if let Some(protocol) = request.get("protocol").and_then(serde_json::Value::as_u64)
+        && protocol != PROTOCOL_VERSION
+    {
+        return Err(DispatchError::new(
+            2,
+            format!(
+                "this Dusk speaks protocol {PROTOCOL_VERSION} but the client speaks protocol \
+                 {protocol}; use a dusk, duskd and PowerToys plugin from the same release"
+            ),
+        ));
+    }
+    let request: Request = serde_json::from_value(request)
+        .map_err(|error| DispatchError::new(2, error.to_string()))?;
     match request {
+        Request::Version => Ok(serde_json::json!({
+            "protocol": PROTOCOL_VERSION,
+            "daemon": env!("CARGO_PKG_VERSION"),
+        })),
         Request::List => {
             let monitors = service
                 .list_monitors()
@@ -478,10 +502,14 @@ impl DispatchError {
         let code = match &error {
             UseCaseError::Backend(BackendError::NotFound(_))
             | UseCaseError::PresetNotFound(_)
+            | UseCaseError::NoPresets
+            | UseCaseError::PresetEntryNotFound { .. }
             | UseCaseError::HotkeyNotFound(_) => 3,
             UseCaseError::Backend(BackendError::NotResponding(_)) => 4,
             UseCaseError::InputChangeDeclined | UseCaseError::InputChangeReverted => 6,
             UseCaseError::UnsupportedControl(_)
+            | UseCaseError::NothingToCapture(_)
+            | UseCaseError::NoSelection(_)
             | UseCaseError::PresetExists(_)
             | UseCaseError::Domain(
                 dusk_domain::DomainError::NormalizedValueOutOfRange(_)
@@ -526,6 +554,7 @@ pub use windows_pipe::{PIPE_ENV, PipeServer, pipe_name, transact};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dusk_app::HotkeyApi;
     use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
     use std::sync::Arc;
 
@@ -616,6 +645,50 @@ mod tests {
 
     fn call(service: &dusk_app::MonitorService, request: &str) -> serde_json::Value {
         serde_json::from_slice(&dispatch(service, request.as_bytes())).unwrap()
+    }
+
+    #[test]
+    fn requests_from_another_protocol_are_refused_with_a_clear_message() {
+        let h = harness();
+        let current = call(&h.service, r#"{"op":"list","protocol":1}"#);
+        assert_eq!(current["ok"], true, "{current}");
+        let older_client = call(&h.service, r#"{"op":"list"}"#);
+        assert_eq!(older_client["ok"], true, "{older_client}");
+
+        let newer = call(&h.service, r#"{"op":"list","protocol":2}"#);
+        assert_eq!(newer["code"], 2);
+        assert!(
+            newer["error"]
+                .as_str()
+                .unwrap()
+                .contains("speaks protocol 1"),
+            "{newer}"
+        );
+
+        let version = call(&h.service, r#"{"op":"version","protocol":1}"#);
+        assert_eq!(version["result"]["protocol"], PROTOCOL_VERSION);
+        assert_eq!(version["result"]["daemon"], env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn preset_errors_have_meaningful_exit_codes() {
+        // No presets to cycle through: "not found" (3), not "invalid usage" (2).
+        let empty = harness();
+        let cycled = call(&empty.service, r#"{"op":"preset_cycle"}"#);
+        assert_eq!(cycled["code"], 3, "{cycled}");
+        assert_eq!(cycled["error"], "no presets are defined");
+
+        // A monitor with nothing a preset can hold: like an unsupported control (2).
+        let bare = Harness::new(FakeBackend::single(FakeMonitor::new("bare")));
+        let saved = call(
+            &bare.service,
+            r#"{"op":"preset_save","name":"P","monitor":"bare"}"#,
+        );
+        assert_eq!(saved["code"], 2, "{saved}");
+        assert_eq!(
+            saved["error"],
+            "monitor bare has no controls that a preset can save"
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use dusk_app::{BackendError, HotkeyOutcome, UseCaseError};
+use dusk_app::{ControlApi, HotkeyApi, PresetApi, SettingsApi};
 use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness, ScriptedPrompter};
 use dusk_domain::{ControlKey, DomainError, HotkeyAction, HotkeyBinding, Key, KeyCombo, MonitorId};
 

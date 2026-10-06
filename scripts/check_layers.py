@@ -15,7 +15,7 @@ import subprocess
 import sys
 
 INNER = {"dusk-domain", "dusk-app"}
-ANY = None  # composition roots and spikes may depend on anything
+ANY = None  # composition roots may depend on anything
 
 # Allowed normal/build dependencies per crate (workspace and external).
 RULES = {
@@ -34,7 +34,6 @@ RULES = {
     "dusk-ui-win32": INNER | {"dusk-ui-model", "log", "windows"},
     "dusk-bin-cli": ANY,
     "dusk-bin-daemon": ANY,
-    "dusk-windows-ddc-spike": ANY,
 }
 
 # Crates that must keep `#![forbid(unsafe_code)]` (ARCH section 12).

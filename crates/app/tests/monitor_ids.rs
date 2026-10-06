@@ -1,6 +1,7 @@
 //! SPEC-MON-1: when monitor IDs change (e.g. from position-based to EDID
 //! serial-based), saved presets and hotkeys follow the monitor.
 
+use dusk_app::PresetApi;
 use dusk_ddc_fake::{FakeBackend, FakeMonitor, Harness};
 use dusk_domain::{ControlKey, ControlValue, HotkeyBinding, MonitorId, Preset, PresetEntry};
 
