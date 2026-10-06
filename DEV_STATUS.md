@@ -64,7 +64,8 @@ Findings of a full design and code review, most important first. Tick an item wh
 2. **To release v1.0:**
    - Push the review commits and confirm CI passes on the MSVC toolchain (local builds use GNU).
    - ~~Start with Windows~~ done (SPEC-UI-12): Settings > General toggle for the per-user Run entry (`"<duskd.exe>" --background`); the entry is the setting. Owner check pending: turn it on, sign out and in, confirm Dusk starts in the tray without a window.
-   - Release workflow: build on a version tag and publish a zip with `duskd.exe`, `dusk.exe` and both integrations; choose the first version number (currently 0.1.0, set once in the workspace `Cargo.toml`).
+   - ~~Release workflow~~ done: `.github/workflows/release.yml` runs on a `v*.*.*` tag (checks the tag against the sources, tests, builds, packages with `scripts/package_release.ps1`, publishes the zip and its SHA-256); `scripts/set_version.py` sets the version in all four places. Version set to **1.0.0**. Packaging verified locally (8.9 MB zip; the packaged daemon reports 1.0.0). The Command Palette extension needs the .NET 9 Runtime (checked by its install script); the PowerToys Run plugin uses PowerToys' own.
+   - Publish: follow [RELEASING.md](RELEASING.md) (push, wait for CI, then tag `v1.0.0` and push the tag).
    - Reinstall the PowerToys Run and Command Palette integrations on the reference PC to pick up the client timeout and protocol version (R12, R13).
 3. **Decision pending (owner):** live preview (SPEC-WR-9) is stored as a setting but has no effect; implement it or remove the setting.
 

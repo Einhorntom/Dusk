@@ -6,3 +6,6 @@ obj/
 
 # Python bytecode
 __pycache__/
+
+# Release packages (scripts/package_release.ps1)
+/dist/

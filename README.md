@@ -6,7 +6,7 @@ Control your monitors from the Windows tray. Switch between day and night setups
 
 Dusk talks to external monitors over **DDC/CI** (the standard monitor-control channel in HDMI, DisplayPort and USB-C) and to a laptop's **built-in display** through Windows. It is a small Rust tray app with presets, global hotkeys, a command line, and PowerToys Run / Command Palette integration.
 
-> **Status:** v1 features are complete on Windows 11. There are no prebuilt releases yet; build from source (below). Scheduled presets (v2) and Ubuntu support (v3) are planned.
+> **Status:** 1.0 for Windows 11: presets, hotkeys, the built-in display and PowerToys integrations. Download it from [Releases](https://github.com/Einhorntom/Dusk/releases) or build from source. Scheduled presets and Ubuntu support are planned.
 
 ## Features
 
@@ -27,11 +27,19 @@ Dusk talks to external monitors over **DDC/CI** (the standard monitor-control ch
 - A monitor with DDC/CI enabled (usually an on-screen menu option). Tested on a **Lenovo L32p-30** over USB-C with Intel Iris Xe graphics, plus that laptop's built-in display. Other monitors work through capability discovery but are not yet verified.
 - To build: Rust 1.88 or newer (edition 2024, let chains). Rust's default Windows toolchain (MSVC) needs the Visual Studio Build Tools with the C++ workload for its linker. Without them, use the GNU toolchain with MinGW-w64 on `PATH`: `rustup target add x86_64-pc-windows-gnu` and build with `cargo +stable-x86_64-pc-windows-gnu build --release --bins --target x86_64-pc-windows-gnu`. For the PowerToys integrations: the .NET 9 SDK and PowerToys 0.96.
 
-## Build and run
+## Install
+
+1. Download `Dusk-<version>-x64.zip` from [Releases](https://github.com/Einhorntom/Dusk/releases) (a `.sha256` file is next to it).
+2. Extract it to a folder of your own, e.g. `%LOCALAPPDATA%\Programs\Dusk`.
+3. Run `duskd.exe`. It starts in the tray; turn on **Settings > General > Start with Windows** to have it there after every sign-in.
+
+The executables are not code-signed yet, so Windows SmartScreen may ask before the first start ("More info" > "Run anyway"). No installer and no administrator rights are needed; to uninstall, turn off Start with Windows, quit Dusk and delete the folder (settings stay in `%APPDATA%\Dusk`).
+
+## Build and run from source
 
 ```powershell
-git clone https://github.com/<you>/dusk.git
-cd dusk
+git clone https://github.com/Einhorntom/Dusk.git
+cd Dusk
 cargo build --release --bins                # LTO, stripped: duskd.exe is about 1.5 MB
 .\target\release\duskd.exe
 ```
@@ -74,11 +82,11 @@ Both integrations are thin clients of the running `duskd`.
 **PowerToys Run** (Alt+Space): type `dusk` and then a preset name, `brightness 40`, `contrast 60`, `volume 20` or `input hdmi`. Control words can be shortened (`dusk bri 30`), and extra words pick a monitor (`dusk bri 30 built`).
 
 ```powershell
-# Quit PowerToys first, then:
+# Quit PowerToys first, then (from the release folder or the repository):
 powershell -ExecutionPolicy Bypass -File .\integrations\install-powertoys-run.ps1
 ```
 
-**Command Palette**: open **Dusk** and type the same commands, or type a preset name directly ("Apply monitor preset: Night mode"). Installing it requires Windows Developer Mode (Settings > System > Advanced > For developers):
+**Command Palette**: open **Dusk** and type the same commands, or type a preset name directly ("Apply monitor preset: Night mode"). Installing it requires Windows Developer Mode (Settings > System > Advanced > For developers) and the [.NET 9 Runtime](https://dotnet.microsoft.com/download/dotnet/9.0); Windows runs it from the folder you install it from, so keep that folder:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\integrations\install-command-palette.ps1
@@ -105,6 +113,7 @@ More detail:
 - [SPEC.md](SPEC.md): precise, testable behavior.
 - [ARCH.md](ARCH.md): architecture and design decisions.
 - [DEV_STATUS.md](DEV_STATUS.md): progress, validation and roadmap.
+- [RELEASING.md](RELEASING.md): how to publish a release.
 
 ## Development
 
@@ -120,6 +129,10 @@ dotnet test integrations/Dusk.Integrations.sln -c Release -p:Platform=x64
 - **No hardware needed:** the regular tests use simulated monitors, and the end-to-end smoke test starts `duskd --demo` on a private pipe.
 - **Hardware checks are opt-in:** `cargo test -p dusk-ddc-windows -- --ignored` and `cargo test -p dusk-panel-windows -- --ignored`. The first only reads. The panel test changes the built-in display's brightness by 1 % for a moment and restores it.
 - **C# contract test:** set `DUSKD_EXE` to a built `duskd.exe` to run the C# client against the real daemon.
+
+## Making a release
+
+See [RELEASING.md](RELEASING.md): set the version with `scripts/set_version.py`, push a `vX.Y.Z` tag, and the Release workflow builds and publishes the zip.
 
 ## Roadmap
 
