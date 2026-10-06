@@ -74,6 +74,25 @@ pub(super) fn build_general(builder: &mut Builder<'_>) {
     );
     builder.row("Settings", Some("Changes are saved automatically."), 0);
     let toggle_width = builder.px(44);
+    builder.context.modern.starts_with_windows = crate::autostart::is_enabled();
+    let (top, height) = builder.row(
+        "Start with Windows",
+        Some("Starts Dusk in the tray when you sign in."),
+        toggle_width,
+    );
+    builder.create(
+        w!("BUTTON"),
+        "",
+        Control::AutostartToggle.id(),
+        WS_TABSTOP.0 | BS_OWNERDRAW as u32,
+        (
+            builder.control_x(toggle_width),
+            top + (height - builder.px(24)) / 2,
+            toggle_width,
+            builder.px(24),
+        ),
+        FontKind::Body,
+    );
     let (top, height) = builder.row(
         "Diagnostic log",
         Some("Records warnings and errors in %LOCALAPPDATA%\\Dusk\\logs to help track down problems."),

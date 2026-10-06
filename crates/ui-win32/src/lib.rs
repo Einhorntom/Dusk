@@ -66,6 +66,7 @@ const TRAY_ID: u32 = 1;
 const MENU_SETTINGS: usize = 200;
 const MENU_QUIT: usize = 201;
 
+mod autostart;
 mod hotkeys;
 mod icons;
 mod instance;

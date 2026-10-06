@@ -305,13 +305,17 @@ pub(crate) fn draw_item(context: &WindowContext, item: &DRAWITEMSTRUCT) {
             DT_LEFT,
         );
     } else if let Some(
-        toggle @ (Control::ConfirmToggle | Control::OsdToggle | Control::LogToggle),
+        toggle @ (Control::ConfirmToggle
+        | Control::OsdToggle
+        | Control::LogToggle
+        | Control::AutostartToggle),
     ) = control
     {
         let settings = current_settings(context);
         let on = match toggle {
             Control::OsdToggle => settings.show_osd,
             Control::LogToggle => settings.diagnostic_log,
+            Control::AutostartToggle => context.modern.starts_with_windows,
             _ => settings.confirm_input_change,
         };
         unsafe {

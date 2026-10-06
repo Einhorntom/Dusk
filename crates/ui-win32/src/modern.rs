@@ -231,6 +231,8 @@ pub(crate) struct State {
     pending_settings: Option<AppSettings>,
     preset_name: String,
     editing_preset: Option<String>,
+    /// Whether the Run entry exists, read when the General page is built.
+    starts_with_windows: bool,
     scroll_y: i32,
     total_height: i32,
 }
@@ -259,6 +261,7 @@ impl State {
             pending_settings: None,
             preset_name: String::new(),
             editing_preset: None,
+            starts_with_windows: false,
             scroll_y: 0,
             total_height: 0,
         }
@@ -693,6 +696,31 @@ pub(crate) fn handle_command(context: &mut WindowContext, wparam: WPARAM) {
         Control::Combo(_) if notification == CBN_SELCHANGE => apply_enum(context, id),
         Control::HotkeyRemove(index) if clicked => remove_hotkey(context, index),
         Control::HotkeyAdd if clicked => add_hotkey(context),
+        Control::AutostartToggle => {
+            let wanted = !context.modern.starts_with_windows;
+            match crate::autostart::set_enabled(wanted) {
+                Ok(()) => {
+                    context.modern.starts_with_windows = wanted;
+                    set_status(
+                        context,
+                        if wanted {
+                            "Dusk will start in the tray when you sign in."
+                        } else {
+                            "Dusk will no longer start when you sign in."
+                        },
+                    );
+                }
+                Err(error) => set_status(context, &error),
+            }
+            if let Some(window) = context.modern.children.iter().find(|window| {
+                let id = unsafe { GetDlgCtrlID(**window) };
+                id == i32::from(control.id())
+            }) {
+                unsafe {
+                    let _ = InvalidateRect(Some(*window), None, true);
+                }
+            }
+        }
         Control::ConfirmToggle | Control::OsdToggle | Control::LogToggle => {
             let mut settings = current_settings(context);
             match control {
