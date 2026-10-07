@@ -11,6 +11,10 @@ dusk-app = { path = "../app" }
 dusk-domain = { path = "../domain" }
 dusk-ui-model = { path = "../ui-model" }
 windows = { version = "0.62", features = [
+    "ApplicationModel",
+    "ApplicationModel_Activation",
+    "Foundation",
+    "Win32_Storage_Packaging_Appx",
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",

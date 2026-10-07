@@ -31,6 +31,22 @@ Releases are built and published by GitHub Actions ([release.yml](.github/workfl
    powershell -ExecutionPolicy Bypass -File .\integrations\install-command-palette.ps1
    ```
 
+## Microsoft Store
+
+The Release workflow also builds `Dusk-<version>-x64.msix` (the Store package; unsigned, the Store signs it) and attaches it to the workflow run as an artifact: GitHub > Actions > the Release run > Artifacts.
+
+**Once (first submission):**
+
+1. Put the identity from Partner Center (your app > Product identity) into [packaging/msix/store.json](packaging/msix/store.json): `Package/Identity/Name`, `Package/Identity/Publisher` (`CN=...`), `Package/Properties/PublisherDisplayName`, and the reserved name as `display_name`. Commit it; the next release builds a package the Store accepts.
+2. Fill in the Store listing: description, screenshots (Settings pages; `duskd --demo` shows simulated monitors), category (Utilities & tools), age rating questionnaire, and the privacy policy URL: https://github.com/Einhorntom/Dusk/blob/main/PRIVACY.md
+3. When asked why the package uses restricted capabilities:
+   - **runFullTrust**: "Dusk is a desktop tray app. It controls external monitors over DDC/CI (Dxva2 monitor configuration API) and the built-in display through WMI, registers global hotkeys, shows a notification-area icon, and serves its command-line tool over a local named pipe. These need a full-trust desktop process."
+   - **unvirtualizedResources**: "Only %APPDATA%\Dusk and %LOCALAPPDATA%\Dusk are excluded from virtualization. They hold Dusk's documented, user-editable settings file (config.toml) and its optional diagnostic log, which are shared with Dusk's standalone (zip) version and its command-line tool, and which users open in Explorer and edit by hand. Virtualizing them would hide the documented files and split the settings between the two versions."
+
+**Every release:** after the Release workflow, download the `.msix` artifact and upload it in Partner Center (your app > a new submission > Packages), then submit. Certification usually takes a few days.
+
+**Testing a package locally** (Developer Mode): `scripts/package_msix.ps1` leaves the unpacked layout in `dist/msix/`; register it with `Add-AppxPackage -Register dist\msix\Dusk-<version>-x64\AppxManifest.xml`, try it (Start menu "Dusk", `dusk version` in a terminal, Start with Windows), and remove it with `Get-AppxPackage <identity name> | Remove-AppxPackage`. Quit the zip version first: only one Dusk runs at a time.
+
 ## If something goes wrong
 
 - **The workflow fails before publishing:** fix the cause on `main`, then move the tag to the fixed commit: `git tag -d v1.2.3`, `git push origin :refs/tags/v1.2.3`, tag again and push.

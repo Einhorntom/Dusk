@@ -56,6 +56,18 @@ jobs:
         shell: pwsh
         run: ./scripts/package_release.ps1 -Version $env:VERSION
 
+      # The Microsoft Store package. Unsigned (the Store signs it), so it is
+      # a workflow artifact to upload in Partner Center, not a release asset.
+      - name: Package for the Microsoft Store
+        shell: pwsh
+        run: ./scripts/package_msix.ps1 -Version $env:VERSION
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Dusk-${{ env.VERSION }}-x64-msix
+          path: dist/Dusk-${{ env.VERSION }}-x64.msix
+          if-no-files-found: error
+
       - name: Publish the release
         shell: pwsh
         env:

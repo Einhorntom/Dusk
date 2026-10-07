@@ -9,7 +9,8 @@ Outputs (next to this script):
   tray-light.ico           white glyph for dark taskbars
   tray-dark.ico            black glyph for light taskbars
   dusk-256.png             preview (README)
-and the PowerToys Run and Command Palette images in integrations/.
+the PowerToys Run and Command Palette images in integrations/, and the
+MSIX package images in packaging/msix/Assets.
 
 Usage: python assets/icons/make_icons.py
 """
@@ -205,6 +206,7 @@ def main():
     root = os.path.normpath(os.path.join(HERE, "..", ".."))
     run_images = os.path.join(root, "integrations", "PowerToysRun", "Images")
     palette_assets = os.path.join(root, "integrations", "CommandPalette", "Assets")
+    msix_assets = os.path.join(root, "packaging", "msix", "Assets")
     pngs = {
         # PowerToys Run: light glyph on dark themes, dark glyph on light themes.
         os.path.join(run_images, "dusk.dark.png"): render(64, glyph_painter(64, (0xF0, 0xF0, 0xF0))),
@@ -213,6 +215,10 @@ def main():
         os.path.join(palette_assets, "Square44x44Logo.png"): render(44, app_painter(44)),
         os.path.join(palette_assets, "Square150x150Logo.png"): render(150, app_painter(150)),
         os.path.join(palette_assets, "StoreLogo.png"): render(50, app_painter(50)),
+        # MSIX package (Microsoft Store): tiles, app list and Store logo.
+        os.path.join(msix_assets, "Square44x44Logo.png"): render(44, app_painter(44)),
+        os.path.join(msix_assets, "Square150x150Logo.png"): render(150, app_painter(150)),
+        os.path.join(msix_assets, "StoreLogo.png"): render(50, app_painter(50)),
         # Preview for the README.
         os.path.join(HERE, "dusk-256.png"): render(256, app_painter(256)),
     }

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The MSIX package for the Microsoft Store. scripts/package_msix.ps1 fills in
+  {IDENTITY_NAME}, {PUBLISHER}, {PUBLISHER_DISPLAY_NAME}, {DISPLAY_NAME}
+  (from packaging/msix/store.json, as reserved in Partner Center) and
+  {VERSION}, then packs it with makeappx.
+
+  - Full-trust desktop app: tray, global hotkeys, DDC/CI and WMI need it
+    (runFullTrust).
+  - %APPDATA%\Dusk and %LOCALAPPDATA%\Dusk are excluded from write
+    virtualization (unvirtualizedResources), so the Store version, the zip
+    version and the CLI share one hand-editable config.toml, and the logs
+    stay where the docs say (SPEC-DAT-1, SPEC-NFR-3).
+  - Start with Windows uses the DuskStartup task (SPEC-UI-12).
+  - `dusk` stays a command in terminals through an execution alias.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  xmlns:virtualization="http://schemas.microsoft.com/appx/manifest/virtualization/windows10"
+  IgnorableNamespaces="uap uap3 desktop desktop4 rescap virtualization">
+
+  <Identity Name="{IDENTITY_NAME}" Publisher="{PUBLISHER}" Version="{VERSION}.0" ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>{DISPLAY_NAME}</DisplayName>
+    <PublisherDisplayName>{PUBLISHER_DISPLAY_NAME}</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <virtualization:FileSystemWriteVirtualization>
+      <virtualization:ExcludedDirectories>
+        <virtualization:ExcludedDirectory>$(KnownFolder:RoamingAppData)\Dusk</virtualization:ExcludedDirectory>
+        <virtualization:ExcludedDirectory>$(KnownFolder:LocalAppData)\Dusk</virtualization:ExcludedDirectory>
+      </virtualization:ExcludedDirectories>
+    </virtualization:FileSystemWriteVirtualization>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="Dusk" Executable="duskd.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="{DISPLAY_NAME}"
+        Description="Control your monitors from the tray: presets, hotkeys, brightness, input and colour."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <desktop:Extension Category="windows.startupTask" Executable="duskd.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="DuskStartup" Enabled="false" DisplayName="{DISPLAY_NAME}" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+
+    <Application Id="DuskCli" Executable="dusk.exe" EntryPoint="Windows.FullTrustApplication"
+      desktop4:Subsystem="console" desktop4:SupportsMultipleInstances="true">
+      <uap:VisualElements
+        DisplayName="{DISPLAY_NAME} command line"
+        Description="The dusk command: read and set monitor controls and presets."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        AppListEntry="none" />
+      <Extensions>
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="dusk.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="dusk.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
+  </Capabilities>
+</Package>

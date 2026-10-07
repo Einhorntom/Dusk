@@ -72,12 +72,14 @@ mod icons;
 mod instance;
 mod keys;
 mod modern;
+mod package;
 mod prompts;
 mod tasks;
 
 pub use instance::{
     Claim, InstanceGuard, claim_instance, request_show_settings, show_startup_error,
 };
+pub use package::{is_packaged, started_at_sign_in};
 pub use prompts::DesktopInputPrompter;
 pub use tasks::CommitNotifier;
 

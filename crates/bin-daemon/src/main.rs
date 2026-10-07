@@ -109,7 +109,12 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
 
 fn run(logger: &'static DaemonLogger) -> Result<(), Box<dyn std::error::Error>> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-    let options = parse_options(&arguments)?;
+    let mut options = parse_options(&arguments)?;
+    if dusk_ui_win32::is_packaged() {
+        log::info!("running from the Dusk package (Microsoft Store version)");
+        // The package's startup task cannot pass --background (SPEC-UI-12).
+        options.background |= dusk_ui_win32::started_at_sign_in();
+    }
 
     // One daemon per pipe: a second start shows the running one's Settings.
     let instance_key = dusk_ipc::pipe_name();

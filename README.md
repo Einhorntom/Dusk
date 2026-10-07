@@ -113,7 +113,8 @@ More detail:
 - [SPEC.md](SPEC.md): precise, testable behavior.
 - [ARCH.md](ARCH.md): architecture and design decisions.
 - [DEV_STATUS.md](DEV_STATUS.md): progress, validation and roadmap.
-- [RELEASING.md](RELEASING.md): how to publish a release.
+- [RELEASING.md](RELEASING.md): how to publish a release (GitHub and Microsoft Store).
+- [PRIVACY.md](PRIVACY.md): privacy policy (Dusk collects nothing).
 
 ## Development
 
