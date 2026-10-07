@@ -12,17 +12,19 @@
     version and the CLI share one hand-editable config.toml, and the logs
     stay where the docs say (SPEC-DAT-1, SPEC-NFR-3).
   - Start with Windows uses the DuskStartup task (SPEC-UI-12).
-  - `dusk` stays a command in terminals through an execution alias.
+  - `dusk` stays a command in terminals through an execution alias on the
+    main app (a second, Start-menu-hidden app would be "headless", which the
+    Store rejects).
 -->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   xmlns:virtualization="http://schemas.microsoft.com/appx/manifest/virtualization/windows10"
-  IgnorableNamespaces="uap uap3 desktop desktop4 rescap virtualization">
+  IgnorableNamespaces="uap uap5 desktop desktop4 rescap virtualization">
 
   <Identity Name="{IDENTITY_NAME}" Publisher="{PUBLISHER}" Version="{VERSION}.0" ProcessorArchitecture="x64" />
 
@@ -47,7 +49,10 @@
   </Resources>
 
   <Applications>
-    <Application Id="Dusk" Executable="duskd.exe" EntryPoint="Windows.FullTrustApplication">
+    <!-- Multiple instances: required by the console alias. Dusk itself
+         keeps one daemon per session (a second start hands over, SPEC-NFR-2). -->
+    <Application Id="Dusk" Executable="duskd.exe" EntryPoint="Windows.FullTrustApplication"
+      desktop4:SupportsMultipleInstances="true">
       <uap:VisualElements
         DisplayName="{DISPLAY_NAME}"
         Description="Control your monitors from the tray: presets, hotkeys, brightness, input and colour."
@@ -58,24 +63,13 @@
         <desktop:Extension Category="windows.startupTask" Executable="duskd.exe" EntryPoint="Windows.FullTrustApplication">
           <desktop:StartupTask TaskId="DuskStartup" Enabled="false" DisplayName="{DISPLAY_NAME}" />
         </desktop:Extension>
-      </Extensions>
-    </Application>
-
-    <Application Id="DuskCli" Executable="dusk.exe" EntryPoint="Windows.FullTrustApplication"
-      desktop4:Subsystem="console" desktop4:SupportsMultipleInstances="true">
-      <uap:VisualElements
-        DisplayName="{DISPLAY_NAME} command line"
-        Description="The dusk command: read and set monitor controls and presets."
-        BackgroundColor="transparent"
-        Square150x150Logo="Assets\Square150x150Logo.png"
-        Square44x44Logo="Assets\Square44x44Logo.png"
-        AppListEntry="none" />
-      <Extensions>
-        <uap3:Extension Category="windows.appExecutionAlias" Executable="dusk.exe" EntryPoint="Windows.FullTrustApplication">
-          <uap3:AppExecutionAlias>
-            <desktop:ExecutionAlias Alias="dusk.exe" />
-          </uap3:AppExecutionAlias>
-        </uap3:Extension>
+        <!-- `dusk` in terminals. On the main app (not a separate one): the Store
+             does not allow apps hidden from the Start menu ("headless"). -->
+        <uap5:Extension Category="windows.appExecutionAlias" Executable="dusk.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap5:AppExecutionAlias desktop4:Subsystem="console">
+            <uap5:ExecutionAlias Alias="dusk.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
       </Extensions>
     </Application>
   </Applications>
